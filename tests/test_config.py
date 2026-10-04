@@ -15,8 +15,12 @@ def test_load_config_defaults(monkeypatch):
 def test_load_config_missing_keys(monkeypatch):
     monkeypatch.delenv("CALLMEBOT_PHONE", raising=False)
     monkeypatch.delenv("CALLMEBOT_APIKEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     
     cfg = load_config()
     assert cfg.phone == ""
     assert cfg.apikey == ""
+    assert cfg.telegram_bot_token == ""
+    assert cfg.telegram_chat_id == ""
     assert cfg.is_configured is False

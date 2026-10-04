@@ -5,6 +5,8 @@ from typing import Optional
 import logging
 import requests
 
+from chart import generate_stock_chart
+
 logger = logging.getLogger(__name__)
 
 class BaseNotifier(ABC):
@@ -44,7 +46,6 @@ class TelegramNotifier(BaseNotifier):
             res = requests.get(url, timeout=10)
             data = res.json()
             if data.get("ok") and data.get("result"):
-                # Grab the latest message
                 for update in reversed(data["result"]):
                     msg = update.get("message") or update.get("my_chat_member")
                     if msg and "chat" in msg:
@@ -72,14 +73,25 @@ class TelegramNotifier(BaseNotifier):
         }
         try:
             res = requests.post(url, json=payload, timeout=15)
-            if res.status_code == 200 and res.json().get("ok"):
-                logger.info(f"Telegram alert sent successfully to chat {self.chat_id}.")
-                return True
-            else:
-                logger.error(f"Telegram API error ({res.status_code}): {res.text}")
-                return False
+            return res.status_code == 200 and res.json().get("ok", False)
         except Exception as e:
             logger.error(f"Failed to send Telegram message: {e}")
+            return False
+
+    def send_photo(self, photo_bytes: bytes, caption: str) -> bool:
+        if not self.bot_token or not self.chat_id:
+            return False
+        url = f"{self.BASE_URL}{self.bot_token}/sendPhoto"
+        try:
+            res = requests.post(
+                url,
+                data={"chat_id": self.chat_id, "caption": caption, "parse_mode": "HTML"},
+                files={"photo": ("chart.png", photo_bytes, "image/png")},
+                timeout=20
+            )
+            return res.status_code == 200 and res.json().get("ok", False)
+        except Exception as e:
+            logger.error(f"Failed to send Telegram photo: {e}")
             return False
 
     def send_alert(
@@ -106,6 +118,17 @@ class TelegramNotifier(BaseNotifier):
             msg += f"📝 <b>Note:</b> {note}\n"
         msg += f"⏰ <b>Time:</b> {now_str}"
 
+        # Try sending with visual chart first
+        try:
+            chart_bytes = generate_stock_chart(ticker=ticker, target_price=target_price)
+            if chart_bytes:
+                sent = self.send_photo(photo_bytes=chart_bytes, caption=msg)
+                if sent:
+                    return True
+        except Exception as e:
+            logger.warning(f"Could not generate/send chart for {ticker}: {e}")
+
+        # Fallback to text message
         return self.send_raw_message(msg)
 
 
@@ -180,7 +203,6 @@ class ConsoleNotifier(BaseNotifier):
 
 
 def create_notifier_from_config(cfg) -> BaseNotifier:
-    """Factory creating TelegramNotifier if configured, otherwise CallMeBot or Console."""
     if cfg.telegram_bot_token and cfg.telegram_chat_id:
         return TelegramNotifier(bot_token=cfg.telegram_bot_token, chat_id=cfg.telegram_chat_id)
     elif cfg.phone and cfg.apikey:

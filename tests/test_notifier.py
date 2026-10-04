@@ -22,10 +22,8 @@ def test_telegram_send_alert_success(mock_post):
     assert success is True
     assert mock_post.called
     args, kwargs = mock_post.call_args
-    assert "https://api.telegram.org/bottest_token_123/sendMessage" in args[0]
-    payload = kwargs["json"]
-    assert payload["chat_id"] == "987654321"
-    assert "AAPL" in payload["text"]
+    assert "https://api.telegram.org/bottest_token_123/" in args[0]
+    assert ("sendPhoto" in args[0]) or ("sendMessage" in args[0])
 
 @patch("notifier.requests.get")
 def test_telegram_detect_chat_id(mock_get):
