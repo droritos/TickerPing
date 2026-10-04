@@ -1,5 +1,7 @@
 import os
 import asyncio
+import threading
+import time
 import logging
 from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any
@@ -7,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+import requests
 
 from config import load_config
 from engine import StockEngine, evaluate_alarm
@@ -20,6 +23,7 @@ config = load_config()
 alarm_manager = AlarmManager(storage_path=config.data_file)
 engine = StockEngine()
 
+# --- Price Poller ---
 async def poll_alarms_cycle():
     cfg = load_config()
     alarms = alarm_manager.get_alarms()
@@ -61,11 +65,28 @@ async def poller_worker():
         cfg = load_config()
         await asyncio.sleep(cfg.poll_interval)
 
+# --- Telegram 2-Way Bot Thread ---
+def telegram_listener_thread():
+    from telegram_bot import run_bot
+    try:
+        run_bot()
+    except Exception as e:
+        logger.error(f"Telegram listener error: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(poller_worker())
+    # Start poller
+    poller_task = asyncio.create_task(poller_worker())
+    
+    # Start telegram 2-way bot thread if token is present
+    cfg = load_config()
+    if cfg.telegram_bot_token:
+        logger.info("Starting Telegram 2-Way Bot listener thread...")
+        tg_thread = threading.Thread(target=telegram_listener_thread, daemon=True)
+        tg_thread.start()
+
     yield
-    task.cancel()
+    poller_task.cancel()
 
 app = FastAPI(title="TickerPing", lifespan=lifespan)
 
@@ -91,6 +112,7 @@ class SaveSettingsRequest(BaseModel):
     poll_interval: Optional[int] = 60
 
 @app.get("/api/status")
+@app.get("/health")
 def get_status():
     cfg = load_config()
     channel = "None"
@@ -132,7 +154,6 @@ def save_settings(req: SaveSettingsRequest):
         with open(".env", "w", encoding="utf-8") as f:
             f.write("\n".join(env_lines) + "\n")
         
-        # Reload environment
         for line in env_lines:
             k, v = line.split("=", 1)
             os.environ[k] = v
@@ -246,4 +267,5 @@ def serve_index():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("app:app", host="0.0.0.0", port=port)
