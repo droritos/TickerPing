@@ -10,5 +10,53 @@
     "trigger_price": null,
     "created_at": "2026-10-04T15:50:40.859802",
     "last_triggered_at": null
+  },
+  {
+    "id": "cc0481c5",
+    "ticker": "NFLX",
+    "target_price": 84.0,
+    "direction": "ABOVE",
+    "note": "",
+    "active": true,
+    "triggered": false,
+    "trigger_price": null,
+    "created_at": "2026-10-04T15:51:59.185725",
+    "last_triggered_at": null
+  },
+  {
+    "id": "9241b177",
+    "ticker": "URA",
+    "target_price": 50.0,
+    "direction": "BELOW",
+    "note": "",
+    "active": true,
+    "triggered": true,
+    "trigger_price": 39.79,
+    "created_at": "2026-10-04T15:59:08.832254",
+    "last_triggered_at": "2026-10-04T15:59:16.092579"
+  },
+  {
+    "id": "d46772a4",
+    "ticker": "URA",
+    "target_price": 56.0,
+    "direction": "BELOW",
+    "note": "",
+    "active": true,
+    "triggered": true,
+    "trigger_price": 39.79,
+    "created_at": "2026-10-04T16:00:28.691595",
+    "last_triggered_at": "2026-10-04T16:01:19.194783"
+  },
+  {
+    "id": "310280ac",
+    "ticker": "URA",
+    "target_price": 77.0,
+    "direction": "BELOW",
+    "note": "",
+    "active": true,
+    "triggered": true,
+    "trigger_price": 39.79,
+    "created_at": "2026-10-04T16:02:14.792982",
+    "last_triggered_at": "2026-10-04T16:02:23.305113"
   }
 ]

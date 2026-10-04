@@ -1,16 +1,20 @@
-name: TickerPing 24/7 Stock Check
+name: TickerPing 24/7 Cloud Bot
 
 on:
   schedule:
-    # Runs every 15 minutes Mon-Fri during trading hours (13:00 to 21:00 UTC)
-    - cron: '*/15 13-21 * * 1-5'
-  workflow_dispatch: # Allows 1-click manual run anytime from GitHub
+    # Runs every 5 minutes 24/7 (unlimited on public repository)
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # Allows 1-click manual trigger from GitHub anytime
+
+concurrency:
+  group: tickerping-bot
+  cancel-in-progress: false
 
 permissions:
   contents: write
 
 jobs:
-  check-stocks:
+  run-cloud-bot:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -26,19 +30,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install yfinance requests python-dotenv matplotlib
 
-      - name: Run Stock Price Check
+      - name: Run 24/7 Cloud Runner
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          CALLMEBOT_PHONE: ${{ secrets.CALLMEBOT_PHONE }}
-          CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
           DATA_FILE_PATH: alarms.json
+          STATE_FILE_PATH: bot_state.json
+          MAX_RUNTIME_SECONDS: 260
+          LOOP_INTERVAL_SECONDS: 60
         run: |
-          python check_alarms.py
+          python cloud_runner.py
 
-      - name: Commit & Push Alarm Trigger Status
+      - name: Commit & Push Alarm Trigger Status & Bot State
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add alarms.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: update alarm trigger status [skip ci]" && git push)
+          git add alarms.json bot_state.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: sync alarms and bot state [skip ci]" && git push)
