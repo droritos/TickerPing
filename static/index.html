@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TickerPing — Free 24/7 Stock Price Alarmer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              500: '#22c55e',
+              600: '#16a34a',
+              700: '#15803d',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased flex flex-col">
+
+  <!-- Navigation Bar -->
+  <header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur sticky top-0 z-40">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+          <span class="text-xl">📈</span>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+            TickerPing
+            <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">24/7 Free</span>
+          </h1>
+          <p class="text-xs text-slate-400">Autonomous Instant Stock Alarmer</p>
+        </div>
+      </div>
+
+      <div class="flex items-center space-x-3">
+        <button id="btn-refresh" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-2 rounded-lg border border-slate-700 transition flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          Refresh
+        </button>
+
+        <button id="btn-open-settings" class="text-xs bg-sky-600 hover:bg-sky-500 text-white font-medium px-3.5 py-2 rounded-lg shadow-sm shadow-sky-600/30 transition flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.75-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/></svg>
+          Telegram Setup
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-8 space-y-8">
+
+    <!-- Status Alert Bar if not configured -->
+    <div id="alerts-warning" class="hidden bg-amber-500/10 border border-amber-500/20 text-amber-300 p-4 rounded-xl flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="text-2xl">⚠️</span>
+        <div>
+          <p class="text-sm font-semibold">Telegram Alerts Not Configured</p>
+          <p class="text-xs text-amber-400/80">Connect your free Telegram bot in 30 seconds to receive instant notifications on your phone.</p>
+        </div>
+      </div>
+      <button onclick="openSettingsModal()" class="text-xs bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3 py-1.5 rounded-lg transition">Setup Telegram</button>
+    </div>
+
+    <!-- Add Alarm Card -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+      <div class="absolute -right-16 -top-16 w-48 h-48 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none"></div>
+
+      <h2 class="text-base font-semibold text-white mb-4 flex items-center gap-2">
+        <span class="text-emerald-400 text-lg">+</span> Set New Stock Alarm
+      </h2>
+
+      <form id="form-add-alarm" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3.5 items-end">
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Stock Ticker</label>
+          <input type="text" id="input-ticker" placeholder="e.g. AAPL, NVDA" required uppercase class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 transition uppercase font-mono font-bold">
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Alert Condition</label>
+          <select id="input-direction" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 transition">
+            <option value="ABOVE">Price Goes Above (>=)</option>
+            <option value="BELOW">Price Goes Below (<=)</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Target Price ($)</label>
+          <input type="number" id="input-target" step="0.01" min="0.01" placeholder="250.00" required class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 transition font-mono">
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Custom Note (Optional)</label>
+          <input type="text" id="input-note" placeholder="e.g. Breakout point" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 transition">
+        </div>
+
+        <div>
+          <button type="submit" id="btn-submit-alarm" class="w-full bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-semibold py-2.5 px-4 rounded-xl shadow-lg shadow-emerald-600/20 transition flex items-center justify-center gap-2">
+            <span>Set Alarm</span>
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Active Alarms Grid -->
+    <div>
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold text-white flex items-center gap-2">
+          Your Monitored Stocks
+          <span id="alarm-count-badge" class="text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full border border-slate-700">0</span>
+        </h2>
+        <div class="text-xs text-slate-400 flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          Auto-polling every <span id="poll-interval-text">60</span>s
+        </div>
+      </div>
+
+      <!-- Empty state -->
+      <div id="alarms-empty" class="hidden bg-slate-900/40 border border-dashed border-slate-800 rounded-2xl p-12 text-center space-y-3">
+        <div class="text-4xl">🔔</div>
+        <p class="text-slate-300 font-medium">No stock alarms set yet</p>
+        <p class="text-xs text-slate-500 max-w-sm mx-auto">Add your first stock ticker above to start receiving instant alerts on your phone when your target price is reached.</p>
+      </div>
+
+      <!-- Alarms List Container -->
+      <div id="alarms-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+    </div>
+  </main>
+
+  <!-- Settings / Telegram Modal -->
+  <div id="modal-settings" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 relative">
+      <button onclick="closeSettingsModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white transition">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+      </button>
+
+      <div class="space-y-1">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+          <span>✈️</span> Telegram Notification Setup
+        </h3>
+        <p class="text-xs text-slate-400">100% Free & Unlimited (Takes 45 seconds to create)</p>
+      </div>
+
+      <div class="bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-xs text-slate-300 space-y-2">
+        <p class="font-semibold text-sky-400">How to get your free bot in 3 steps:</p>
+        <ol class="list-decimal list-inside space-y-1 text-slate-400">
+          <li>Open Telegram, search for <strong class="text-white">@BotFather</strong></li>
+          <li>Send <span class="bg-slate-800 px-1 py-0.5 rounded text-white font-mono">/newbot</span> and copy the <strong>HTTP API Token</strong></li>
+          <li>Open your new bot in Telegram, tap <strong>Start</strong>, then click "Detect My Chat ID" below!</li>
+        </ol>
+      </div>
+
+      <form id="form-settings" class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Telegram Bot Token</label>
+          <input type="text" id="settings-token" placeholder="7123456789:AAH..." required class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-sky-500 font-mono">
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-xs font-medium text-slate-400">Telegram Chat ID</label>
+            <button type="button" id="btn-detect-chat" class="text-[11px] text-sky-400 hover:text-sky-300 underline font-medium">Detect Automatically</button>
+          </div>
+          <input type="text" id="settings-chatid" placeholder="Your Chat ID (or click Detect)" required class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-sky-500 font-mono">
+        </div>
+
+        <div class="flex items-center gap-2 pt-2">
+          <button type="button" id="btn-test-telegram" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium py-2.5 rounded-xl border border-slate-700 transition">
+            Test Phone Alert 📲
+          </button>
+          <button type="submit" class="flex-1 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold py-2.5 rounded-xl transition shadow-lg shadow-sky-600/20">
+            Save Settings
+          </button>
+        </div>
+      </form>
+
+      <div id="test-result-msg" class="text-xs text-center hidden"></div>
+    </div>
+  </div>
+
+  <footer class="border-t border-slate-800 py-4 text-center text-xs text-slate-500">
+    TickerPing &copy; 2026 — 100% Free Stock Alarmer. Runs locally or 24/7 on GitHub Actions.
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
