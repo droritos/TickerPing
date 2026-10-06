@@ -74,3 +74,14 @@ class BotStateManager:
         state = self._read_state()
         state["last_update_id"] = offset
         self._write_state(state)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get an arbitrary key from persistent state."""
+        return self._read_state().get(key, default)
+
+    def set(self, key: str, value: Any) -> None:
+        """Set and persist an arbitrary key in state."""
+        state = self._read_state()
+        state[key] = value
+        self._write_state(state)
+

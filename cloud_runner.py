@@ -134,9 +134,32 @@ class CloudRunner:
                 )
                 self.alarm_manager.mark_triggered(alarm["id"], trigger_price=quote.price)
 
+    def ensure_bot_avatar(self):
+        """Automatically set the bot profile photo in Telegram if not already configured."""
+        if not self.token or not os.path.exists("bot_avatar.jpg"):
+            return
+        if self.state_manager.get("avatar_set"):
+            return
+        try:
+            with open("bot_avatar.jpg", "rb") as f:
+                res = requests.post(
+                    f"{self.base_url}/setMyProfilePhoto",
+                    data={"photo": '{"type": "static", "photo": "attach://avatar"}'},
+                    files={"avatar": ("bot_avatar.jpg", f, "image/jpeg")},
+                    timeout=15
+                )
+                if res.status_code == 200 and res.json().get("ok"):
+                    logger.info("Bot profile photo successfully configured in Telegram!")
+                    self.state_manager.set("avatar_set", True)
+                else:
+                    logger.info(f"setMyProfilePhoto response: {res.text}")
+        except Exception as e:
+            logger.warning(f"Could not auto-set bot profile photo: {e}")
+
     def run(self) -> int:
         start_time = time.time()
         logger.info(f"Starting CloudRunner (Max runtime: {self.max_runtime_seconds}s, Interval: {self.loop_interval_seconds}s)")
+        self.ensure_bot_avatar()
         cycles = 0
 
         while True:
