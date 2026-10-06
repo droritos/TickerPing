@@ -100,6 +100,8 @@ class TelegramCommandHandler:
                 self.handle_delete(chat_id, tokens[1])
             else:
                 self._send(chat_id, "⚠️ Specify what to delete, e.g.: <code>/del AAPL</code>", reply_markup=MAIN_MENU_KEYBOARD)
+        elif cmd in ("/clear", "clear", "/cleanup", "cleanup"):
+            self.handle_clear_triggered(chat_id)
         elif cmd in ("/price", "/quote", "price", "quote"):
             if len(tokens) > 1:
                 self.handle_price(chat_id, tokens[1])
@@ -273,6 +275,11 @@ class TelegramCommandHandler:
             else:
                 direction = "ABOVE"
 
+        # Clean up any previously triggered alarms for this ticker
+        for old in self.alarm_manager.get_alarms():
+            if old.get("ticker", "").upper() == ticker and old.get("triggered", False):
+                self.alarm_manager.delete_alarm(old["id"])
+
         alarm = self.alarm_manager.add_alarm(
             ticker=ticker,
             target_price=target_price,
@@ -292,6 +299,15 @@ class TelegramCommandHandler:
             msg += f"📝 <b>Note:</b> {note}\n"
         msg += f"🆔 <b>ID:</b> <code>{alarm['id']}</code>"
         self._send(chat_id, msg, reply_markup=MAIN_MENU_KEYBOARD)
+
+    def handle_clear_triggered(self, chat_id: str) -> None:
+        """Clear all triggered/expired alarms."""
+        cleared = self.alarm_manager.clear_triggered()
+        if cleared > 0:
+            plural = f"{cleared} triggered alarms" if cleared > 1 else "1 triggered alarm"
+            self._send(chat_id, f"🧹 Cleared {plural}!", reply_markup=MAIN_MENU_KEYBOARD)
+        else:
+            self._send(chat_id, "✨ No triggered alarms to clear.", reply_markup=MAIN_MENU_KEYBOARD)
 
     def handle_list(self, chat_id: str) -> None:
         """List all configured stock alarms with inline 1-tap delete buttons."""
@@ -329,17 +345,21 @@ class TelegramCommandHandler:
         self._send(chat_id, "\n".join(lines), reply_markup=reply_markup)
 
     def handle_delete(self, chat_id: str, identifier: str) -> None:
-        """Delete an existing alarm by UUID ID or ticker symbol."""
+        """Delete an existing alarm by UUID ID or all alarms matching a ticker symbol."""
         target = identifier.strip().upper()
-        alarms = self.alarm_manager.get_alarms()
-        deleted = False
 
-        for a in alarms:
-            if a["id"].upper() == target or a["ticker"].upper() == target:
-                self.alarm_manager.delete_alarm(a["id"])
-                self._send(chat_id, f"🗑️ Deleted alarm for <b>{a['ticker']}</b> (${a['target_price']:.2f}).", reply_markup=MAIN_MENU_KEYBOARD)
-                deleted = True
-                break
+        # 1. Check if identifier is an exact alarm ID
+        alarm = self.alarm_manager.get_alarm(target)
+        if alarm:
+            ticker = alarm.get("ticker", target)
+            self.alarm_manager.delete_alarm(target)
+            self._send(chat_id, f"🗑️ Deleted alarm for <b>{ticker}</b> (${alarm['target_price']:.2f}).", reply_markup=MAIN_MENU_KEYBOARD)
+            return
 
-        if not deleted:
+        # 2. Otherwise delete all alarms matching ticker
+        deleted_count = self.alarm_manager.delete_by_ticker(target)
+        if deleted_count > 0:
+            plural = f"{deleted_count} alarms" if deleted_count > 1 else "alarm"
+            self._send(chat_id, f"🗑️ Deleted {plural} for <b>{target}</b>.", reply_markup=MAIN_MENU_KEYBOARD)
+        else:
             self._send(chat_id, f"❌ No alarm found matching '<b>{identifier}</b>'. Tap <b>📋 My Alarms</b> to check active IDs.", reply_markup=MAIN_MENU_KEYBOARD)

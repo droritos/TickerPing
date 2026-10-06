@@ -474,3 +474,57 @@ def test_callback_query_delete(handler, alarm_mgr, sent_messages):
     assert "Deleted NVDA" in callback_answers[0][1]
     assert "Deleted alarm for <b>NVDA</b>" in sent_messages[-1][1]
 
+
+def test_delete_all_by_ticker(handler, alarm_mgr, sent_messages):
+    alarm_mgr.add_alarm(ticker="URA", target_price=50.0, direction="BELOW")
+    alarm_mgr.add_alarm(ticker="URA", target_price=56.0, direction="BELOW")
+    assert len(alarm_mgr.get_alarms()) == 2
+
+    update = {
+        "update_id": 132,
+        "message": {"chat": {"id": 1438330510}, "text": "/del URA"}
+    }
+    assert handler.handle_update(update) is True
+    assert len(alarm_mgr.get_alarms()) == 0
+    assert "Deleted 2 alarms for <b>URA</b>" in sent_messages[-1][1]
+
+
+def test_clear_command(handler, alarm_mgr, sent_messages):
+    a1 = alarm_mgr.add_alarm(ticker="URA", target_price=50.0, direction="BELOW")
+    alarm_mgr.add_alarm(ticker="AAPL", target_price=250.0, direction="ABOVE")
+    alarm_mgr.mark_triggered(a1["id"], 49.0)
+
+    update = {
+        "update_id": 133,
+        "message": {"chat": {"id": 1438330510}, "text": "/clear"}
+    }
+    assert handler.handle_update(update) is True
+    assert len(alarm_mgr.get_alarms()) == 1
+    assert "Cleared 1 triggered alarm" in sent_messages[-1][1]
+
+    # Run again when none are triggered
+    update2 = {
+        "update_id": 134,
+        "message": {"chat": {"id": 1438330510}, "text": "/clear"}
+    }
+    assert handler.handle_update(update2) is True
+    assert "No triggered alarms to clear" in sent_messages[-1][1]
+
+
+def test_set_cleans_triggered_alarms_for_same_ticker(handler, alarm_mgr, sent_messages):
+    a1 = alarm_mgr.add_alarm(ticker="URA", target_price=50.0, direction="BELOW")
+    alarm_mgr.mark_triggered(a1["id"], 48.0)
+    assert len(alarm_mgr.get_alarms()) == 1
+
+    # Now user sets a new alarm for URA
+    update = {
+        "update_id": 135,
+        "message": {"chat": {"id": 1438330510}, "text": "URA 60 BELOW"}
+    }
+    assert handler.handle_update(update) is True
+    alarms = alarm_mgr.get_alarms()
+    assert len(alarms) == 1
+    assert alarms[0]["target_price"] == 60.0
+    assert alarms[0]["triggered"] is False
+
+

@@ -55,9 +55,10 @@ class AlarmManager:
         return self._read_file()
 
     def get_alarm(self, alarm_id: str) -> Optional[Dict[str, Any]]:
+        clean_id = str(alarm_id).strip().lower()
         alarms = self._read_file()
         for a in alarms:
-            if a.get("id") == alarm_id:
+            if str(a.get("id", "")).strip().lower() == clean_id:
                 return a
         return None
 
@@ -92,27 +93,49 @@ class AlarmManager:
         return alarm
 
     def delete_alarm(self, alarm_id: str) -> bool:
+        clean_id = str(alarm_id).strip().lower()
         alarms = self._read_file()
         initial_len = len(alarms)
-        alarms = [a for a in alarms if a.get("id") != alarm_id]
+        alarms = [a for a in alarms if str(a.get("id", "")).strip().lower() != clean_id]
         if len(alarms) < initial_len:
             self._write_file(alarms)
             return True
         return False
 
+    def delete_by_ticker(self, ticker: str) -> int:
+        clean = ticker.strip().upper()
+        alarms = self._read_file()
+        initial_len = len(alarms)
+        alarms = [a for a in alarms if a.get("ticker", "").upper() != clean]
+        deleted_count = initial_len - len(alarms)
+        if deleted_count > 0:
+            self._write_file(alarms)
+        return deleted_count
+
+    def clear_triggered(self) -> int:
+        alarms = self._read_file()
+        initial_len = len(alarms)
+        alarms = [a for a in alarms if not a.get("triggered", False)]
+        deleted_count = initial_len - len(alarms)
+        if deleted_count > 0:
+            self._write_file(alarms)
+        return deleted_count
+
     def toggle_active(self, alarm_id: str) -> bool:
+        clean_id = str(alarm_id).strip().lower()
         alarms = self._read_file()
         for a in alarms:
-            if a.get("id") == alarm_id:
+            if str(a.get("id", "")).strip().lower() == clean_id:
                 a["active"] = not a.get("active", True)
                 self._write_file(alarms)
                 return True
         return False
 
     def mark_triggered(self, alarm_id: str, trigger_price: float) -> bool:
+        clean_id = str(alarm_id).strip().lower()
         alarms = self._read_file()
         for a in alarms:
-            if a.get("id") == alarm_id:
+            if str(a.get("id", "")).strip().lower() == clean_id:
                 a["triggered"] = True
                 a["trigger_price"] = round(float(trigger_price), 2)
                 a["last_triggered_at"] = datetime.now().isoformat()
@@ -121,9 +144,10 @@ class AlarmManager:
         return False
 
     def reset_alarm(self, alarm_id: str) -> bool:
+        clean_id = str(alarm_id).strip().lower()
         alarms = self._read_file()
         for a in alarms:
-            if a.get("id") == alarm_id:
+            if str(a.get("id", "")).strip().lower() == clean_id:
                 a["triggered"] = False
                 a["trigger_price"] = None
                 self._write_file(alarms)

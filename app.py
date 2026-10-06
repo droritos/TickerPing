@@ -75,16 +75,8 @@ def telegram_listener_thread():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Start poller
+    # Poller worker for local web dashboard
     poller_task = asyncio.create_task(poller_worker())
-    
-    # Start telegram 2-way bot thread if token is present
-    cfg = load_config()
-    if cfg.telegram_bot_token:
-        logger.info("Starting Telegram 2-Way Bot listener thread...")
-        tg_thread = threading.Thread(target=telegram_listener_thread, daemon=True)
-        tg_thread.start()
-
     yield
     poller_task.cancel()
 
