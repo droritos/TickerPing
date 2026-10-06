@@ -433,3 +433,44 @@ def test_command_aliases(handler, alarm_mgr, sent_messages):
     assert handled is True
     assert len(sent_messages) == 1
     assert "monitored" in sent_messages[0][1].lower() or "checked" in sent_messages[0][1].lower()
+
+
+def test_persistent_menu_button_triggers(handler, sent_messages):
+    # Test "📈 Quick Quotes"
+    update = {
+        "update_id": 130,
+        "message": {"chat": {"id": 1438330510}, "text": "📈 Quick Quotes"}
+    }
+    assert handler.handle_update(update) is True
+    assert "Market Quick Quotes" in sent_messages[-1][1]
+
+    # Test "➕ How to Set"
+    update = {
+        "update_id": 131,
+        "message": {"chat": {"id": 1438330510}, "text": "➕ How to Set"}
+    }
+    assert handler.handle_update(update) is True
+    assert "How to Set a Stock Alarm" in sent_messages[-1][1]
+
+
+def test_callback_query_delete(handler, alarm_mgr, sent_messages):
+    a = alarm_mgr.add_alarm(ticker="NVDA", target_price=135.0, direction="ABOVE")
+    alarm_id = a["id"]
+    assert len(alarm_mgr.get_alarms()) == 1
+
+    callback_answers = []
+    handler.answer_cb = lambda query_id, text: callback_answers.append((query_id, text))
+
+    query = {
+        "id": "cb_999",
+        "data": f"del:{alarm_id}",
+        "message": {
+            "chat": {"id": 1438330510}
+        }
+    }
+    assert handler.handle_callback_query(query) is True
+    assert len(alarm_mgr.get_alarms()) == 0
+    assert len(callback_answers) == 1
+    assert "Deleted NVDA" in callback_answers[0][1]
+    assert "Deleted alarm for <b>NVDA</b>" in sent_messages[-1][1]
+

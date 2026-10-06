@@ -210,6 +210,24 @@ def background_price_checker(notifier: TelegramNotifier):
             logger.error(f"Error in background price check: {e}")
         time.sleep(POLL_INTERVAL)
 
+from telegram_command_handler import TelegramCommandHandler
+
+def answer_cb(query_id: str, text: Optional[str] = None):
+    try:
+        payload = {"callback_query_id": query_id}
+        if text:
+            payload["text"] = text
+        requests.post(f"{BASE_URL}/answerCallbackQuery", json=payload, timeout=10)
+    except Exception as e:
+        logger.error(f"Error answering callback query: {e}")
+
+cmd_handler = TelegramCommandHandler(
+    alarm_manager=alarm_manager,
+    engine=engine,
+    send_msg_fn=send_msg,
+    answer_cb_fn=answer_cb
+)
+
 def run_bot():
     if not TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN not found in .env! Cannot start bot.")
@@ -234,43 +252,10 @@ def run_bot():
 
             for update in data.get("result", []):
                 offset = update["update_id"] + 1
-                msg = update.get("message")
-                if not msg or "text" not in msg:
-                    continue
-
-                chat_id = str(msg["chat"]["id"])
-                text = msg["text"].strip()
-                tokens = text.split()
-
-                if not tokens:
-                    continue
-
-                cmd = tokens[0].lower()
-
-                if cmd in ("/start", "/help", "help"):
-                    handle_start(chat_id)
-                elif cmd in ("/set", "/add", "add", "set"):
-                    handle_set(chat_id, tokens[1:])
-                elif cmd in ("/list", "/alarms", "list", "alarms"):
-                    handle_list(chat_id)
-                elif cmd in ("/del", "/delete", "/rm", "del", "delete"):
-                    if len(tokens) > 1:
-                        handle_delete(chat_id, tokens[1])
-                    else:
-                        send_msg(chat_id, "⚠️ Specify what to delete, e.g.: <code>/del AAPL</code>")
-                elif cmd in ("/price", "/quote", "price", "quote"):
-                    if len(tokens) > 1:
-                        handle_price(chat_id, tokens[1])
-                    else:
-                        send_msg(chat_id, "⚠️ Specify a ticker, e.g.: <code>/price AAPL</code>")
-                elif cmd in ("/check", "check"):
-                    check_all_alarms_now(notifier, specific_chat=chat_id)
-                else:
-                    # Smart parse: "AAPL 340" or "NVDA 130 ABOVE"
-                    if len(tokens) >= 2 and tokens[1].replace(".", "", 1).replace("$", "").isdigit():
-                        handle_set(chat_id, tokens)
-                    else:
-                        send_msg(chat_id, "❓ Unknown command. Send <code>/help</code> to see available commands, or <code>AAPL 340</code> to set an alarm.")
+                if "callback_query" in update:
+                    cmd_handler.handle_callback_query(update["callback_query"])
+                elif "message" in update:
+                    cmd_handler.handle_update(update)
 
         except requests.exceptions.RequestException as e:
             time.sleep(3)

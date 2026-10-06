@@ -60,7 +60,7 @@ class TelegramNotifier(BaseNotifier):
             logger.error(f"Failed to detect Telegram chat ID: {e}")
             return None
 
-    def send_raw_message(self, message: str) -> bool:
+    def send_raw_message(self, message: str, reply_markup: Optional[dict] = None) -> bool:
         if not self.bot_token or not self.chat_id:
             logger.warning("Telegram bot credentials missing.")
             return False
@@ -71,6 +71,8 @@ class TelegramNotifier(BaseNotifier):
             "text": message,
             "parse_mode": "HTML"
         }
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
         try:
             res = requests.post(url, json=payload, timeout=15)
             return res.status_code == 200 and res.json().get("ok", False)
@@ -78,14 +80,17 @@ class TelegramNotifier(BaseNotifier):
             logger.error(f"Failed to send Telegram message: {e}")
             return False
 
-    def send_photo(self, photo_bytes: bytes, caption: str) -> bool:
+    def send_photo(self, photo_bytes: bytes, caption: str, reply_markup: Optional[dict] = None) -> bool:
         if not self.bot_token or not self.chat_id:
             return False
         url = f"{self.BASE_URL}{self.bot_token}/sendPhoto"
+        data = {"chat_id": self.chat_id, "caption": caption, "parse_mode": "HTML"}
+        if reply_markup:
+            data["reply_markup"] = json.dumps(reply_markup)
         try:
             res = requests.post(
                 url,
-                data={"chat_id": self.chat_id, "caption": caption, "parse_mode": "HTML"},
+                data=data,
                 files={"photo": ("chart.png", photo_bytes, "image/png")},
                 timeout=20
             )
@@ -118,18 +123,26 @@ class TelegramNotifier(BaseNotifier):
             msg += f"📝 <b>Note:</b> {note}\n"
         msg += f"⏰ <b>Time:</b> {now_str}"
 
+        inline_markup = {
+            "inline_keyboard": [
+                [
+                    {"text": f"🌐 View {ticker.upper()} on Yahoo", "url": f"https://finance.yahoo.com/quote/{ticker.upper()}"}
+                ]
+            ]
+        }
+
         # Try sending with visual chart first
         try:
             chart_bytes = generate_stock_chart(ticker=ticker, target_price=target_price)
             if chart_bytes:
-                sent = self.send_photo(photo_bytes=chart_bytes, caption=msg)
+                sent = self.send_photo(photo_bytes=chart_bytes, caption=msg, reply_markup=inline_markup)
                 if sent:
                     return True
         except Exception as e:
             logger.warning(f"Could not generate/send chart for {ticker}: {e}")
 
         # Fallback to text message
-        return self.send_raw_message(msg)
+        return self.send_raw_message(msg, reply_markup=inline_markup)
 
 
 class CallMeBotWhatsAppNotifier(BaseNotifier):

@@ -44,21 +44,40 @@ class CloudRunner:
         self.cmd_handler = TelegramCommandHandler(
             alarm_manager=self.alarm_manager,
             engine=self.engine,
-            send_msg_fn=self.send_telegram_msg
+            send_msg_fn=self.send_telegram_msg,
+            answer_cb_fn=self.answer_callback_query
         )
 
-    def send_telegram_msg(self, chat_id: str, text: str):
+    def send_telegram_msg(self, chat_id: str, text: str, reply_markup: Optional[dict] = None):
         if not self.token:
             logger.warning("No Telegram token configured; skipping send_telegram_msg.")
             return
+        payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
         try:
             requests.post(
                 f"{self.base_url}/sendMessage",
-                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
+                json=payload,
                 timeout=15
             )
         except Exception as e:
             logger.error(f"Failed to send Telegram message: {e}")
+
+    def answer_callback_query(self, callback_query_id: str, text: Optional[str] = None):
+        if not self.token:
+            return
+        payload = {"callback_query_id": callback_query_id}
+        if text:
+            payload["text"] = text
+        try:
+            requests.post(
+                f"{self.base_url}/answerCallbackQuery",
+                json=payload,
+                timeout=10
+            )
+        except Exception as e:
+            logger.error(f"Failed to answer Telegram callback query: {e}")
 
     def poll_telegram_updates(self):
         if not self.token:
@@ -76,7 +95,10 @@ class CloudRunner:
 
             updates = data.get("result", [])
             for u in updates:
-                self.cmd_handler.handle_update(u)
+                if "callback_query" in u:
+                    self.cmd_handler.handle_callback_query(u["callback_query"])
+                elif "message" in u:
+                    self.cmd_handler.handle_update(u)
                 self.state_manager.set_last_offset(u["update_id"])
         except Exception as e:
             logger.error(f"Error polling Telegram updates: {e}")
