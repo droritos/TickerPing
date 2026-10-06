@@ -91,6 +91,8 @@ class TelegramCommandHandler:
             self.handle_how_to_set(chat_id)
         elif text in ("❓ Help", "❓ help") or cmd in ("/start", "/help", "help"):
             self.handle_start(chat_id)
+        elif cmd in ("/menu", "menu", "/buttons", "buttons"):
+            self._send(chat_id, "🔘 <b>Menu buttons refreshed!</b> Tap any button below to proceed:", reply_markup=MAIN_MENU_KEYBOARD)
         elif cmd in ("/set", "/add", "add", "set"):
             self.handle_set(chat_id, tokens[1:])
         elif cmd in ("/del", "/delete", "/rm", "del", "delete"):

@@ -28,11 +28,14 @@ ADMIN_CHAT_ID = config.telegram_chat_id
 BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
 
-def send_msg(chat_id: str, text: str):
+def send_msg(chat_id: str, text: str, reply_markup: Optional[dict] = None):
     try:
+        payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
         requests.post(
             f"{BASE_URL}/sendMessage",
-            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
+            json=payload,
             timeout=15
         )
     except Exception as e:
