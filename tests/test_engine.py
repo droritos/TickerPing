@@ -128,4 +128,29 @@ def test_engine_empty_tickers():
     assert engine.get_news("") == []
     assert engine.get_earnings_info("   ") is None
 
+def test_engine_get_earnings_info_past_date():
+    engine = StockEngine()
+    mock_ticker = MagicMock()
+    from datetime import datetime, timedelta
+    past_date = datetime.now() - timedelta(days=5)
+    mock_ticker.calendar = {
+        "Earnings Date": [past_date.date()],
+        "Earnings Average": 1.10
+    }
+    with patch("yfinance.Ticker", return_value=mock_ticker):
+        info = engine.get_earnings_info("OLD")
+        assert info is None
+
+def test_engine_get_earnings_info_invalid_date():
+    engine = StockEngine()
+    mock_ticker = MagicMock()
+    mock_ticker.calendar = {
+        "Earnings Date": ["not-a-real-date"],
+        "Earnings Average": 1.10
+    }
+    with patch("yfinance.Ticker", return_value=mock_ticker):
+        info = engine.get_earnings_info("BAD")
+        assert info is None
+
+
 

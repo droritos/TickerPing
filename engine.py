@@ -176,7 +176,10 @@ class StockEngine:
                 try:
                     dt = datetime.fromisoformat(earnings_date).date()
                 except ValueError:
-                    dt = datetime.strptime(earnings_date[:10], "%Y-%m-%d").date()
+                    try:
+                        dt = datetime.strptime(earnings_date[:10], "%Y-%m-%d").date()
+                    except (ValueError, TypeError):
+                        return None
             elif isinstance(earnings_date, datetime):
                 dt = earnings_date.date()
             elif isinstance(earnings_date, date):
@@ -188,6 +191,8 @@ class StockEngine:
 
             today = date.today()
             days_until = (dt - today).days
+            if days_until < 0:
+                return None
 
             parsed_eps = None
             if eps_estimate is not None:
