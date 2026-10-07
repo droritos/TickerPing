@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import logging
+import subprocess
 import requests
 from typing import Optional
 
@@ -28,7 +29,7 @@ class CloudRunner:
         chat_id: str,
         storage_path: str = "alarms.json",
         state_path: str = "bot_state.json",
-        max_runtime_seconds: int = 260,
+        max_runtime_seconds: int = 18000,
         loop_interval_seconds: int = 60
     ):
         self.token = token
@@ -36,7 +37,8 @@ class CloudRunner:
         self.max_runtime_seconds = max_runtime_seconds
         self.loop_interval_seconds = loop_interval_seconds
         self.base_url = f"https://api.telegram.org/bot{token}"
-
+        self.storage_path = storage_path
+        self.state_path = state_path
         self.alarm_manager = AlarmManager(storage_path=storage_path)
         self.state_manager = BotStateManager(storage_path=state_path)
         self.engine = StockEngine()
@@ -79,19 +81,20 @@ class CloudRunner:
         except Exception as e:
             logger.error(f"Failed to answer Telegram callback query: {e}")
 
-    def poll_telegram_updates(self):
+    def poll_telegram_updates(self) -> bool:
+        """Poll Telegram for new commands or button clicks. Returns True if any updates were handled."""
         if not self.token:
-            return
+            return False
         last_offset = self.state_manager.get_last_offset()
         offset = last_offset + 1 if last_offset > 0 else 0
         try:
-            params = {"timeout": 5}
+            params = {"timeout": 3}
             if offset > 0:
                 params["offset"] = offset
-            res = requests.get(f"{self.base_url}/getUpdates", params=params, timeout=10)
+            res = requests.get(f"{self.base_url}/getUpdates", params=params, timeout=8)
             data = res.json()
             if not data.get("ok"):
-                return
+                return False
 
             updates = data.get("result", [])
             for u in updates:
@@ -100,8 +103,26 @@ class CloudRunner:
                 elif "message" in u:
                     self.cmd_handler.handle_update(u)
                 self.state_manager.set_last_offset(u["update_id"])
+            return len(updates) > 0
         except Exception as e:
             logger.error(f"Error polling Telegram updates: {e}")
+            return False
+
+    def git_sync_changes(self):
+        """Sync alarms.json and bot_state.json to GitHub if running inside GitHub Actions."""
+        if os.getenv("GITHUB_ACTIONS") != "true":
+            return
+        try:
+            subprocess.run(["git", "config", "user.name", "github-actions[bot]"], check=False)
+            subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], check=False)
+            subprocess.run(["git", "add", self.storage_path, self.state_path], check=False)
+            diff = subprocess.run(["git", "diff", "--staged", "--quiet"], check=False)
+            if diff.returncode != 0:
+                subprocess.run(["git", "commit", "-m", "chore: sync alarms and bot state [skip ci]"], check=False)
+                subprocess.run(["git", "push"], check=False)
+                logger.info("Auto-synced state changes to git.")
+        except Exception as e:
+            logger.warning(f"Git auto-sync warning: {e}")
 
     def evaluate_active_alarms(self):
         alarms = self.alarm_manager.get_alarms()
@@ -133,6 +154,7 @@ class CloudRunner:
                     note=note
                 )
                 self.alarm_manager.mark_triggered(alarm["id"], trigger_price=quote.price)
+                self.git_sync_changes()
 
     def ensure_bot_avatar(self):
         """Automatically set the bot profile photo in Telegram if not already configured."""
@@ -161,44 +183,47 @@ class CloudRunner:
         logger.info(f"Starting CloudRunner (Max runtime: {self.max_runtime_seconds}s, Interval: {self.loop_interval_seconds}s)")
         self.ensure_bot_avatar()
         cycles = 0
+        last_stock_check = 0.0
+        last_git_sync = time.time()
 
         while True:
-            elapsed = time.time() - start_time
+            now = time.time()
+            elapsed = now - start_time
             if elapsed >= self.max_runtime_seconds:
                 logger.info(f"Max runtime budget reached ({elapsed:.1f}s >= {self.max_runtime_seconds}s). Exiting cycle.")
                 break
 
-            cycle_start = time.time()
-            logger.info(f"--- Running cloud cycle #{cycles + 1} (Elapsed: {elapsed:.1f}s) ---")
-            
-            # 1. Telegram Updates
-            self.poll_telegram_updates()
+            # 1. Telegram Updates (fast long-poll: returns immediately on message)
+            had_updates = self.poll_telegram_updates()
 
-            # 2. Stock Alarm Check
-            self.evaluate_active_alarms()
+            # 2. Stock Alarm Check every `loop_interval_seconds`
+            if (now - last_stock_check) >= self.loop_interval_seconds:
+                logger.info(f"--- Running stock evaluation cycle #{cycles + 1} (Elapsed: {elapsed:.1f}s) ---")
+                self.evaluate_active_alarms()
+                last_stock_check = time.time()
+                cycles += 1
 
-            cycles += 1
-            cycle_duration = time.time() - cycle_start
-            remaining = self.loop_interval_seconds - cycle_duration
+            # 3. Auto-sync changes to Git if updates occurred or periodically
+            if had_updates or (now - last_git_sync >= 300):
+                self.git_sync_changes()
+                last_git_sync = time.time()
 
-            if remaining > 0 and (time.time() - start_time + remaining) < self.max_runtime_seconds:
-                time.sleep(remaining)
-            elif (time.time() - start_time) < self.max_runtime_seconds:
-                sleep_time = min(5, self.max_runtime_seconds - (time.time() - start_time))
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
-                else:
+            # Brief pause if idle to prevent tight CPU looping
+            if not had_updates:
+                remaining_time = self.max_runtime_seconds - (time.time() - start_time)
+                if remaining_time <= 0:
                     break
-            else:
-                break
+                time.sleep(min(1.0, max(0.05, remaining_time)))
 
+        # Final git sync before exiting
+        self.git_sync_changes()
         return cycles
 
 if __name__ == "__main__":
     cfg = load_config()
     storage = os.getenv("DATA_FILE_PATH", cfg.data_file)
     state = os.getenv("STATE_FILE_PATH", "bot_state.json")
-    max_runtime = int(os.getenv("MAX_RUNTIME_SECONDS", "260"))
+    max_runtime = int(os.getenv("MAX_RUNTIME_SECONDS", "18000"))
     interval = int(os.getenv("LOOP_INTERVAL_SECONDS", "60"))
 
     runner = CloudRunner(

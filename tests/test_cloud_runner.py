@@ -99,7 +99,34 @@ def test_cloud_runner_poll_callback_query(tmp_path):
     }
 
     with patch("requests.get", return_value=mock_resp):
-        runner.poll_telegram_updates()
+        had_updates = runner.poll_telegram_updates()
+        assert had_updates is True
         runner.cmd_handler.handle_callback_query.assert_called_once()
         runner.state_manager.set_last_offset.assert_called_with(52)
+
+
+def test_git_sync_changes_skipped_when_not_github_actions(tmp_path, monkeypatch):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    alarms_file = str(tmp_path / "alarms.json")
+    state_file = str(tmp_path / "bot_state.json")
+    runner = CloudRunner("tok", "123", alarms_file, state_file)
+
+    with patch("subprocess.run") as mock_run:
+        runner.git_sync_changes()
+        mock_run.assert_not_called()
+
+
+def test_git_sync_changes_executes_when_github_actions(tmp_path, monkeypatch):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    alarms_file = str(tmp_path / "alarms.json")
+    state_file = str(tmp_path / "bot_state.json")
+    runner = CloudRunner("tok", "123", alarms_file, state_file)
+
+    mock_diff = MagicMock()
+    mock_diff.returncode = 1  # Indicates diff exists
+
+    with patch("subprocess.run", return_value=mock_diff) as mock_run:
+        runner.git_sync_changes()
+        assert mock_run.call_count >= 3
+
 

@@ -2,8 +2,8 @@ name: TickerPing 24/7 Cloud Bot
 
 on:
   schedule:
-    # Runs every 5 minutes 24/7 (unlimited on public repository)
-    - cron: '*/5 * * * *'
+    # Schedules runner every 30m; queued runner takes over when active runner finishes 5h shift
+    - cron: '*/30 * * * *'
   push:
     branches:
       - main
@@ -39,7 +39,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DATA_FILE_PATH: alarms.json
           STATE_FILE_PATH: bot_state.json
-          MAX_RUNTIME_SECONDS: 260
+          MAX_RUNTIME_SECONDS: 18000
           LOOP_INTERVAL_SECONDS: 60
         run: |
           python cloud_runner.py
