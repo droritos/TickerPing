@@ -1,3 +1,4 @@
+import json
 import urllib.parse
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -123,10 +124,20 @@ class TelegramNotifier(BaseNotifier):
             msg += f"📝 <b>Note:</b> {note}\n"
         msg += f"⏰ <b>Time:</b> {now_str}"
 
+        # Calculate re-arm price levels
+        clean_ticker = ticker.strip().upper()
+        up_price = round(current_price * 1.05, 2)
+        down_price = round(current_price * 0.95, 2)
+
         inline_markup = {
             "inline_keyboard": [
                 [
-                    {"text": f"🌐 View {ticker.upper()} on Yahoo", "url": f"https://finance.yahoo.com/quote/{ticker.upper()}"}
+                    {"text": f"📈 +5% (${up_price:.2f})", "callback_data": f"rearm:{clean_ticker}:{up_price:.2f}:ABOVE"},
+                    {"text": f"📉 -5% (${down_price:.2f})", "callback_data": f"rearm:{clean_ticker}:{down_price:.2f}:BELOW"}
+                ],
+                [
+                    {"text": "📰 Top News", "callback_data": f"news:{clean_ticker}"},
+                    {"text": f"🌐 {clean_ticker} on Yahoo", "url": f"https://finance.yahoo.com/quote/{clean_ticker}"}
                 ]
             ]
         }
