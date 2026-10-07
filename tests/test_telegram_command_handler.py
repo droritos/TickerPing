@@ -738,5 +738,107 @@ def test_help_command_includes_news_and_earnings(handler, sent_messages):
     assert "/earnings" in sent_messages[0][1]
 
 
+def test_news_command_html_escaping(handler, mock_engine, sent_messages):
+    mock_engine.get_news.return_value = [
+        {"title": "AT&T <T> Gains & Tech > Energy", "link": "https://example.com/news?a=1&b=2", "publisher": "S&P Global"}
+    ]
+    update = {
+        "update_id": 213,
+        "message": {"chat": {"id": 1438330510}, "text": "/news T"}
+    }
+    assert handler.handle_update(update) is True
+    assert len(sent_messages) == 1
+    msg = sent_messages[0][1]
+    assert "AT&amp;T &lt;T&gt; Gains &amp; Tech &gt; Energy" in msg
+    assert "https://example.com/news?a=1&amp;b=2" in msg
+    assert "S&amp;P Global" in msg
+
+
+def test_callback_query_rearm_edge_cases(handler, alarm_mgr, sent_messages):
+    callback_answers = []
+    handler.answer_cb = lambda query_id, text: callback_answers.append((query_id, text))
+
+    # Missing parts (< 4)
+    query_short = {
+        "id": "cb_short",
+        "data": "rearm:GOOGL:350",
+        "message": {"chat": {"id": 1438330510}}
+    }
+    assert handler.handle_callback_query(query_short) is True
+    assert "Invalid re-arm data" in callback_answers[-1][1]
+    assert len(alarm_mgr.get_alarms()) == 0
+
+    # Empty ticker
+    query_empty_ticker = {
+        "id": "cb_empty_ticker",
+        "data": "rearm::350:ABOVE",
+        "message": {"chat": {"id": 1438330510}}
+    }
+    assert handler.handle_callback_query(query_empty_ticker) is True
+    assert "Invalid re-arm data" in callback_answers[-1][1]
+    assert len(alarm_mgr.get_alarms()) == 0
+
+    # NaN price
+    query_nan = {
+        "id": "cb_nan",
+        "data": "rearm:GOOGL:nan:ABOVE",
+        "message": {"chat": {"id": 1438330510}}
+    }
+    assert handler.handle_callback_query(query_nan) is True
+    assert "Invalid price" in callback_answers[-1][1]
+    assert len(alarm_mgr.get_alarms()) == 0
+
+    # Non-positive price
+    query_neg = {
+        "id": "cb_neg",
+        "data": "rearm:GOOGL:-50:ABOVE",
+        "message": {"chat": {"id": 1438330510}}
+    }
+    assert handler.handle_callback_query(query_neg) is True
+    assert "Invalid price" in callback_answers[-1][1]
+    assert len(alarm_mgr.get_alarms()) == 0
+
+
+def test_callback_query_none_message(handler, alarm_mgr, sent_messages):
+    callback_answers = []
+    handler.answer_cb = lambda query_id, text: callback_answers.append((query_id, text))
+
+    # Query where message is None, but from user is present
+    query = {
+        "id": "cb_none_msg",
+        "data": "rearm:MSFT:400:ABOVE",
+        "message": None,
+        "from": {"id": 999888}
+    }
+    assert handler.handle_callback_query(query) is True
+    assert len(callback_answers) == 1
+    assert "Re-armed MSFT" in callback_answers[0][1]
+    alarms = alarm_mgr.get_alarms()
+    assert len(alarms) == 1
+    assert alarms[0]["ticker"] == "MSFT"
+    # Confirmation message was sent to from.id
+    assert len(sent_messages) == 1
+    assert sent_messages[0][0] == "999888"
+
+
+def test_earnings_command_singular_day_and_negative_eps(handler, mock_engine, sent_messages):
+    mock_engine.get_earnings_info.return_value = {
+        "date_str": "Tomorrow",
+        "days_until": 1,
+        "eps_estimate": -0.35
+    }
+    update = {
+        "update_id": 214,
+        "message": {"chat": {"id": 1438330510}, "text": "/earnings@TickerPingBot RIVN"}
+    }
+    assert handler.handle_update(update) is True
+    assert len(sent_messages) == 1
+    msg = sent_messages[0][1]
+    assert "Countdown:</b> 1 day" in msg
+    assert "(in 1 day)" in msg
+    assert "-$0.35" in msg
+
+
+
 
 
