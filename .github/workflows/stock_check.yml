@@ -11,7 +11,7 @@ on:
 
 concurrency:
   group: tickerping-bot
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: write
