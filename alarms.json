@@ -6,10 +6,10 @@
     "direction": "ABOVE",
     "note": "",
     "active": true,
-    "triggered": false,
-    "trigger_price": null,
+    "triggered": true,
+    "trigger_price": 350.04,
     "created_at": "2026-10-04T15:50:40.859802",
-    "last_triggered_at": null
+    "last_triggered_at": "2026-10-07T19:43:26.458735"
   },
   {
     "id": "cc0481c5",
