@@ -90,7 +90,7 @@ class TelegramCommandHandler:
         elif text in ("➕ How to Set", "➕ how to set") or cmd in ("/how", "how"):
             self.handle_how_to_set(chat_id)
         elif text in ("❓ Help", "❓ help") or cmd in ("/start", "/help", "help"):
-            self.handle_start(chat_id)
+            self.handle_help(chat_id)
         elif cmd in ("/menu", "menu", "/buttons", "buttons"):
             self._send(chat_id, "🔘 <b>Menu buttons refreshed!</b> Tap any button below to proceed:", reply_markup=MAIN_MENU_KEYBOARD)
         elif cmd in ("/set", "/add", "add", "set"):
@@ -107,6 +107,16 @@ class TelegramCommandHandler:
                 self.handle_price(chat_id, tokens[1])
             else:
                 self._send(chat_id, "⚠️ Specify a ticker, e.g.: <code>/price AAPL</code>", reply_markup=MAIN_MENU_KEYBOARD)
+        elif cmd in ("/news", "news"):
+            if len(tokens) > 1:
+                self.handle_news(chat_id, tokens[1])
+            else:
+                self._send(chat_id, "⚠️ Usage: Specify a ticker, e.g.: <code>/news AAPL</code>", reply_markup=MAIN_MENU_KEYBOARD)
+        elif cmd in ("/earnings", "earnings"):
+            if len(tokens) > 1:
+                self.handle_earnings(chat_id, tokens[1])
+            else:
+                self._send(chat_id, "⚠️ Usage: Specify a ticker, e.g.: <code>/earnings AAPL</code>", reply_markup=MAIN_MENU_KEYBOARD)
         elif cmd in ("/check", "check"):
             self._send(chat_id, "⏰ Alarms are monitored and checked automatically 24/7 in the cloud!", reply_markup=MAIN_MENU_KEYBOARD)
         else:
@@ -173,11 +183,65 @@ class TelegramCommandHandler:
                     self.answer_cb(query_id, "Alarm already deleted.")
             return True
 
+        elif data.startswith("rearm:"):
+            # Format: rearm:<ticker>:<price>:<direction>
+            parts = data.split(":")
+            if len(parts) >= 4:
+                ticker = parts[1].strip().upper()
+                try:
+                    target_price = float(parts[2].replace("$", "").strip())
+                except ValueError:
+                    if self.answer_cb:
+                        self.answer_cb(query_id, "Invalid price.")
+                    return True
+
+                direction = parts[3].strip().upper()
+                if direction not in ("ABOVE", "BELOW"):
+                    direction = "ABOVE"
+
+                # Clean up any previously triggered alarms for this ticker
+                for old in self.alarm_manager.get_alarms():
+                    if old.get("ticker", "").upper() == ticker and old.get("triggered", False):
+                        self.alarm_manager.delete_alarm(old["id"])
+
+                alarm = self.alarm_manager.add_alarm(
+                    ticker=ticker,
+                    target_price=target_price,
+                    direction=direction,
+                    note="Re-armed alert",
+                )
+
+                if self.answer_cb:
+                    self.answer_cb(query_id, f"🎯 Re-armed {ticker} at ${target_price:,.2f}!")
+                if chat_id:
+                    self._send(
+                        chat_id,
+                        f"🎯 <b>Alarm Re-armed!</b>\n\n"
+                        f"Alert set for <b>{ticker}</b> when price is <b>{direction} ${target_price:,.2f}</b>.\n"
+                        f"🆔 <b>ID:</b> <code>{alarm['id']}</code>",
+                        reply_markup=MAIN_MENU_KEYBOARD,
+                    )
+            return True
+
+        elif data.startswith("news:"):
+            # Format: news:<ticker>
+            parts = data.split(":", 1)
+            ticker = parts[1].strip().upper() if len(parts) > 1 else ""
+            if self.answer_cb:
+                self.answer_cb(query_id, f"📰 Loading news for {ticker}...")
+            if chat_id and ticker:
+                self.handle_news(chat_id, ticker)
+            return True
+
         if self.answer_cb:
             self.answer_cb(query_id, None)
         return True
 
     def handle_start(self, chat_id: str) -> None:
+        """Send welcome message and command documentation with persistent bottom menu keyboard."""
+        self.handle_help(chat_id)
+
+    def handle_help(self, chat_id: str) -> None:
         """Send welcome message and command documentation with persistent bottom menu keyboard."""
         msg = (
             "📈 <b>Welcome to TickerPing!</b>\n\n"
@@ -186,6 +250,10 @@ class TelegramCommandHandler:
             "• <code>AAPL 340</code> <i>(smart target)</i>\n"
             "• <code>/set TSLA 210 BELOW</code>\n"
             "• <code>/set NVDA 140 ABOVE Breakout</code>\n\n"
+            "<b>📊 Quotes & Market Data:</b>\n"
+            "• <code>/price AAPL</code> — Live stock quote\n"
+            "• <code>/news NVDA</code> — Latest top headlines\n"
+            "• <code>/earnings MSFT</code> — Next earnings date & EPS estimate\n\n"
             "<b>⚡ Quick Actions:</b>\n"
             "Tap <b>📋 My Alarms</b> below to manage your active triggers."
         )
@@ -233,6 +301,57 @@ class TelegramCommandHandler:
             f"💰 <b>Price:</b> ${quote.price:,.2f} {quote.currency}\n"
             f"📈 <b>Session Change:</b> {sign}{quote.change_percent:.2f}%\n"
             f"🏁 <b>Previous Close:</b> ${quote.previous_close:,.2f}"
+        )
+        self._send(chat_id, msg, reply_markup=MAIN_MENU_KEYBOARD)
+
+    def handle_news(self, chat_id: str, ticker: str) -> None:
+        """Fetch and send the latest top news headlines with clickable links for a ticker."""
+        clean = ticker.strip().replace("$", "").upper()
+        if not clean:
+            self._send(chat_id, "⚠️ Usage: Specify a ticker, e.g.: <code>/news AAPL</code>", reply_markup=MAIN_MENU_KEYBOARD)
+            return
+
+        articles = self.engine.get_news(clean, limit=3)
+        if not articles:
+            self._send(chat_id, f"📰 No recent headlines found for <b>{clean}</b>.", reply_markup=MAIN_MENU_KEYBOARD)
+            return
+
+        lines = [f"📰 <b>Latest News for {clean}:</b>\n"]
+        for i, item in enumerate(articles, 1):
+            title = item.get("title", "").strip()
+            link = item.get("link", "").strip()
+            publisher = item.get("publisher", "Yahoo Finance").strip() or "Yahoo Finance"
+            if link:
+                lines.append(f"{i}. <a href=\"{link}\">{title}</a> <i>({publisher})</i>")
+            else:
+                lines.append(f"{i}. <b>{title}</b> <i>({publisher})</i>")
+
+        self._send(chat_id, "\n\n".join(lines), reply_markup=MAIN_MENU_KEYBOARD)
+
+    def handle_earnings(self, chat_id: str, ticker: str) -> None:
+        """Fetch and send upcoming earnings report date and EPS estimate for a ticker."""
+        clean = ticker.strip().replace("$", "").upper()
+        if not clean:
+            self._send(chat_id, "⚠️ Usage: Specify a ticker, e.g.: <code>/earnings AAPL</code>", reply_markup=MAIN_MENU_KEYBOARD)
+            return
+
+        info = self.engine.get_earnings_info(clean)
+        if not info:
+            self._send(chat_id, f"📅 No upcoming earnings date announced yet for <b>{clean}</b>.", reply_markup=MAIN_MENU_KEYBOARD)
+            return
+
+        date_str = info.get("date_str", "N/A")
+        days = info.get("days_until", 0)
+        eps = info.get("eps_estimate")
+        eps_str = f"${eps:.2f}" if eps is not None else "N/A"
+
+        days_text = f"in {days} days" if days > 0 else "today"
+
+        msg = (
+            f"📅 <b>{clean} Upcoming Earnings</b>\n\n"
+            f"🗓️ <b>Report Date:</b> {date_str} ({days_text})\n"
+            f"⏳ <b>Countdown:</b> {days} days\n"
+            f"💵 <b>Est. EPS:</b> {eps_str}"
         )
         self._send(chat_id, msg, reply_markup=MAIN_MENU_KEYBOARD)
 

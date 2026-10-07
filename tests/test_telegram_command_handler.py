@@ -528,3 +528,215 @@ def test_set_cleans_triggered_alarms_for_same_ticker(handler, alarm_mgr, sent_me
     assert alarms[0]["triggered"] is False
 
 
+# 10. News and Earnings commands and callback queries
+def test_news_command_with_ticker(handler, mock_engine, sent_messages):
+    mock_engine.get_news.return_value = [
+        {"title": "Apple Unveils New AI Chip", "link": "https://finance.yahoo.com/news/apple-ai", "publisher": "Reuters"},
+        {"title": "Tech Stocks Rally", "link": "https://finance.yahoo.com/news/tech-rally", "publisher": "Bloomberg"}
+    ]
+    update = {
+        "update_id": 201,
+        "message": {
+            "chat": {"id": 1438330510},
+            "text": "/news AAPL"
+        }
+    }
+    handled = handler.handle_update(update)
+    assert handled is True
+    assert mock_engine.get_news.call_args[0][0] == "AAPL"
+    assert len(sent_messages) == 1
+    msg = sent_messages[0][1]
+    assert "Apple Unveils New AI Chip" in msg
+    assert "https://finance.yahoo.com/news/apple-ai" in msg
+    assert "Reuters" in msg
+    assert "Tech Stocks Rally" in msg
+
+
+def test_news_command_empty_news(handler, mock_engine, sent_messages):
+    mock_engine.get_news.return_value = []
+    update = {
+        "update_id": 202,
+        "message": {
+            "chat": {"id": 1438330510},
+            "text": "/news MSFT"
+        }
+    }
+    handled = handler.handle_update(update)
+    assert handled is True
+    assert len(sent_messages) == 1
+    assert "No recent headlines found" in sent_messages[0][1]
+    assert "MSFT" in sent_messages[0][1]
+
+
+def test_news_command_missing_arg(handler, sent_messages):
+    update = {
+        "update_id": 203,
+        "message": {
+            "chat": {"id": 1438330510},
+            "text": "/news"
+        }
+    }
+    handled = handler.handle_update(update)
+    assert handled is True
+    assert len(sent_messages) == 1
+    assert "Usage:" in sent_messages[0][1] or "Specify a ticker" in sent_messages[0][1]
+
+
+def test_earnings_command_with_ticker(handler, mock_engine, sent_messages):
+    mock_engine.get_earnings_info.return_value = {
+        "date_str": "Oct 29, 2026",
+        "days_until": 14,
+        "eps_estimate": 1.75
+    }
+    update = {
+        "update_id": 204,
+        "message": {
+            "chat": {"id": 1438330510},
+            "text": "/earnings AAPL"
+        }
+    }
+    handled = handler.handle_update(update)
+    assert handled is True
+    mock_engine.get_earnings_info.assert_called_with("AAPL")
+    assert len(sent_messages) == 1
+    msg = sent_messages[0][1]
+    assert "Oct 29, 2026" in msg
+    assert "14" in msg
+    assert "1.75" in msg
+    assert "AAPL" in msg
+
+
+def test_earnings_command_no_calendar(handler, mock_engine, sent_messages):
+    mock_engine.get_earnings_info.return_value = None
+    update = {
+        "update_id": 205,
+        "message": {
+            "chat": {"id": 1438330510},
+            "text": "/earnings TSLA"
+        }
+    }
+    handled = handler.handle_update(update)
+    assert handled is True
+    assert len(sent_messages) == 1
+    assert "No upcoming earnings date announced yet" in sent_messages[0][1]
+    assert "TSLA" in sent_messages[0][1]
+
+
+def test_earnings_command_missing_arg(handler, sent_messages):
+    update = {
+        "update_id": 206,
+        "message": {
+            "chat": {"id": 1438330510},
+            "text": "/earnings"
+        }
+    }
+    handled = handler.handle_update(update)
+    assert handled is True
+    assert len(sent_messages) == 1
+    assert "Usage:" in sent_messages[0][1] or "Specify a ticker" in sent_messages[0][1]
+
+
+def test_callback_query_rearm(handler, alarm_mgr, sent_messages):
+    old = alarm_mgr.add_alarm(ticker="GOOGL", target_price=300.0, direction="ABOVE")
+    alarm_mgr.mark_triggered(old["id"], 305.0)
+    assert len(alarm_mgr.get_alarms()) == 1
+
+    callback_answers = []
+    handler.answer_cb = lambda query_id, text: callback_answers.append((query_id, text))
+
+    query = {
+        "id": "cb_207",
+        "data": "rearm:GOOGL:368.50:ABOVE",
+        "message": {
+            "chat": {"id": 1438330510}
+        }
+    }
+    handled = handler.handle_callback_query(query)
+    assert handled is True
+
+    alarms = alarm_mgr.get_alarms()
+    assert len(alarms) == 1
+    assert alarms[0]["ticker"] == "GOOGL"
+    assert alarms[0]["target_price"] == 368.50
+    assert alarms[0]["direction"] == "ABOVE"
+    assert alarms[0]["triggered"] is False
+
+    assert len(callback_answers) == 1
+    assert callback_answers[0][0] == "cb_207"
+    assert "GOOGL" in callback_answers[0][1] or "Re-armed" in callback_answers[0][1]
+
+    assert len(sent_messages) == 1
+    assert "GOOGL" in sent_messages[0][1]
+    assert "368.50" in sent_messages[0][1]
+
+
+def test_callback_query_news(handler, mock_engine, sent_messages):
+    mock_engine.get_news.return_value = [
+        {"title": "Nvidia Announces Next-Gen GPU", "link": "https://example.com/nvda-gpu", "publisher": "TechCrunch"}
+    ]
+    callback_answers = []
+    handler.answer_cb = lambda query_id, text: callback_answers.append((query_id, text))
+
+    query = {
+        "id": "cb_208",
+        "data": "news:NVDA",
+        "message": {
+            "chat": {"id": 1438330510}
+        }
+    }
+    handled = handler.handle_callback_query(query)
+    assert handled is True
+    assert mock_engine.get_news.call_args[0][0] == "NVDA"
+    assert len(sent_messages) == 1
+    assert "Nvidia Announces Next-Gen GPU" in sent_messages[0][1]
+    assert "https://example.com/nvda-gpu" in sent_messages[0][1]
+
+
+def test_news_and_earnings_shorthand(handler, mock_engine, sent_messages):
+    mock_engine.get_news.return_value = [{"title": "Headline", "link": "https://link", "publisher": "Pub"}]
+    mock_engine.get_earnings_info.return_value = {"date_str": "Nov 01, 2026", "days_until": 20, "eps_estimate": 2.5}
+
+    # Shorthand "news AAPL"
+    update_news = {
+        "update_id": 209,
+        "message": {"chat": {"id": 1438330510}, "text": "news AAPL"}
+    }
+    assert handler.handle_update(update_news) is True
+    assert "Headline" in sent_messages[-1][1]
+
+    # Shorthand "earnings MSFT"
+    update_earnings = {
+        "update_id": 210,
+        "message": {"chat": {"id": 1438330510}, "text": "earnings MSFT"}
+    }
+    assert handler.handle_update(update_earnings) is True
+    assert "Nov 01, 2026" in sent_messages[-1][1]
+
+
+def test_callback_query_rearm_invalid_price(handler, alarm_mgr, sent_messages):
+    callback_answers = []
+    handler.answer_cb = lambda query_id, text: callback_answers.append((query_id, text))
+
+    query = {
+        "id": "cb_211",
+        "data": "rearm:GOOGL:not_a_price:ABOVE",
+        "message": {"chat": {"id": 1438330510}}
+    }
+    assert handler.handle_callback_query(query) is True
+    assert len(alarm_mgr.get_alarms()) == 0
+    assert len(callback_answers) == 1
+    assert "Invalid price" in callback_answers[0][1]
+
+
+def test_help_command_includes_news_and_earnings(handler, sent_messages):
+    update = {
+        "update_id": 212,
+        "message": {"chat": {"id": 1438330510}, "text": "/help"}
+    }
+    assert handler.handle_update(update) is True
+    assert "/news" in sent_messages[0][1]
+    assert "/earnings" in sent_messages[0][1]
+
+
+
+
