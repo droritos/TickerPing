@@ -46,5 +46,17 @@
     "trigger_price": null,
     "created_at": "2026-10-07T11:42:17.003489",
     "last_triggered_at": null
+  },
+  {
+    "id": "706a47cc",
+    "ticker": "GLW",
+    "target_price": 177.0,
+    "direction": "ABOVE",
+    "note": "",
+    "active": true,
+    "triggered": false,
+    "trigger_price": null,
+    "created_at": "2026-10-07T12:21:05.766688",
+    "last_triggered_at": null
   }
 ]
