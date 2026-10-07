@@ -34,5 +34,17 @@
     "trigger_price": null,
     "created_at": "2026-10-06T21:05:23.256365",
     "last_triggered_at": null
+  },
+  {
+    "id": "81b36381",
+    "ticker": "U",
+    "target_price": 48.0,
+    "direction": "ABOVE",
+    "note": "",
+    "active": true,
+    "triggered": false,
+    "trigger_price": null,
+    "created_at": "2026-10-07T11:42:17.003489",
+    "last_triggered_at": null
   }
 ]
