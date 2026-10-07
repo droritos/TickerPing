@@ -87,7 +87,7 @@ class TelegramNotifier(BaseNotifier):
         url = f"{self.BASE_URL}{self.bot_token}/sendPhoto"
         data = {"chat_id": self.chat_id, "caption": caption, "parse_mode": "HTML"}
         if reply_markup:
-            data["reply_markup"] = json.dumps(reply_markup)
+            data["reply_markup"] = reply_markup if isinstance(reply_markup, str) else json.dumps(reply_markup)
         try:
             res = requests.post(
                 url,
@@ -128,6 +128,7 @@ class TelegramNotifier(BaseNotifier):
         clean_ticker = ticker.strip().upper()
         up_price = round(current_price * 1.05, 2)
         down_price = round(current_price * 0.95, 2)
+        encoded_ticker = urllib.parse.quote(clean_ticker)
 
         inline_markup = {
             "inline_keyboard": [
@@ -137,7 +138,7 @@ class TelegramNotifier(BaseNotifier):
                 ],
                 [
                     {"text": "📰 Top News", "callback_data": f"news:{clean_ticker}"},
-                    {"text": f"🌐 {clean_ticker} on Yahoo", "url": f"https://finance.yahoo.com/quote/{clean_ticker}"}
+                    {"text": f"🌐 {clean_ticker} on Yahoo", "url": f"https://finance.yahoo.com/quote/{encoded_ticker}"}
                 ]
             ]
         }
