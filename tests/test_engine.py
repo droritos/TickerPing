@@ -126,7 +126,46 @@ def test_engine_get_earnings_info_exception():
 def test_engine_empty_tickers():
     engine = StockEngine()
     assert engine.get_news("") == []
+    assert engine.get_news(None) == []
+    assert engine.get_news(123) == []
     assert engine.get_earnings_info("   ") is None
+    assert engine.get_earnings_info(None) is None
+    assert engine.get_earnings_info(123) is None
+    assert engine.get_news("AAPL", limit=0) == []
+    assert engine.get_news("AAPL", limit=-1) == []
+
+def test_engine_get_news_skip_malformed_items():
+    engine = StockEngine()
+    mock_ticker = MagicMock()
+    mock_ticker.news = [
+        "not-a-dict",
+        {"title": "", "publisher": "No Title", "link": ""},
+        {"title": "Valid News 1", "publisher": "Reuters", "link": "https://example.com/1"},
+        {"publisher": "Missing Title", "link": "https://example.com/missing"},
+        {"title": "Valid News 2", "publisher": "Bloomberg", "link": "https://example.com/2"},
+        {"title": "Valid News 3", "publisher": "CNBC", "link": "https://example.com/3"},
+    ]
+    with patch("yfinance.Ticker", return_value=mock_ticker):
+        news = engine.get_news("NVDA", limit=2)
+        assert len(news) == 2
+        assert news[0]["title"] == "Valid News 1"
+        assert news[0]["publisher"] == "Reuters"
+        assert news[1]["title"] == "Valid News 2"
+        assert news[1]["publisher"] == "Bloomberg"
+
+def test_engine_get_earnings_info_eps_list():
+    engine = StockEngine()
+    mock_ticker = MagicMock()
+    from datetime import datetime, timedelta
+    future_date = datetime.now() + timedelta(days=20)
+    mock_ticker.calendar = {
+        "Earnings Date": [future_date.date()],
+        "Earnings Average": [0.85]
+    }
+    with patch("yfinance.Ticker", return_value=mock_ticker):
+        info = engine.get_earnings_info("AAPL")
+        assert info is not None
+        assert info["eps_estimate"] == 0.85
 
 def test_engine_get_earnings_info_past_date():
     engine = StockEngine()
@@ -151,6 +190,7 @@ def test_engine_get_earnings_info_invalid_date():
     with patch("yfinance.Ticker", return_value=mock_ticker):
         info = engine.get_earnings_info("BAD")
         assert info is None
+
 
 
 

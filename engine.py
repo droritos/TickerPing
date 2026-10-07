@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
 from datetime import date, datetime
+import math
 import yfinance as yf
 import logging
 
@@ -89,35 +90,38 @@ class StockEngine:
             return None
 
     def get_news(self, ticker: str, limit: int = 3) -> List[Dict[str, str]]:
-        clean_ticker = ticker.strip().upper()
-        if not clean_ticker:
+        clean_ticker = (ticker or "").strip().upper() if isinstance(ticker, str) else ""
+        if not clean_ticker or limit <= 0:
             return []
 
         try:
             t = yf.Ticker(clean_ticker)
             raw_news = getattr(t, "news", []) or []
             results = []
-            for item in raw_news[:limit]:
+            for item in raw_news:
                 if not isinstance(item, dict):
                     continue
                 title = str(item.get("title", "") or "").strip()
+                if not title:
+                    continue
                 link = str(item.get("link", "") or "").strip()
                 publisher = str(item.get("publisher", "Yahoo Finance") or "").strip()
                 if not publisher:
                     publisher = "Yahoo Finance"
-                if title:
-                    results.append({
-                        "title": title,
-                        "link": link,
-                        "publisher": publisher
-                    })
+                results.append({
+                    "title": title,
+                    "link": link,
+                    "publisher": publisher
+                })
+                if len(results) >= limit:
+                    break
             return results
         except Exception as e:
             logger.warning(f"Error fetching news for {clean_ticker}: {e}")
             return []
 
     def get_earnings_info(self, ticker: str) -> Optional[Dict[str, Any]]:
-        clean_ticker = ticker.strip().upper()
+        clean_ticker = (ticker or "").strip().upper() if isinstance(ticker, str) else ""
         if not clean_ticker:
             return None
 
@@ -144,14 +148,14 @@ class StockEngine:
                 cal_dict = cal.to_dict()
                 for key, val_map in cal_dict.items():
                     k_str = str(key).lower()
-                    if "earnings" in k_str and "date" in k_str:
+                    if "earnings" in k_str and "date" in k_str and earnings_date is None:
                         if isinstance(val_map, dict):
                             vals = list(val_map.values())
                             if vals:
                                 earnings_date = vals[0]
                         else:
                             earnings_date = val_map
-                    if "earnings" in k_str and "average" in k_str:
+                    if "earnings" in k_str and "average" in k_str and eps_estimate is None:
                         if isinstance(val_map, dict):
                             vals = list(val_map.values())
                             if vals:
@@ -168,6 +172,9 @@ class StockEngine:
 
             if isinstance(earnings_date, (list, tuple)) and len(earnings_date) > 0:
                 earnings_date = earnings_date[0]
+
+            if isinstance(eps_estimate, (list, tuple)) and len(eps_estimate) > 0:
+                eps_estimate = eps_estimate[0]
 
             if not earnings_date or (hasattr(earnings_date, "__str__") and str(earnings_date) == "NaT"):
                 return None
@@ -197,9 +204,8 @@ class StockEngine:
             parsed_eps = None
             if eps_estimate is not None:
                 try:
-                    import math
                     val = float(eps_estimate)
-                    if not math.isnan(val):
+                    if math.isfinite(val):
                         parsed_eps = round(val, 2)
                 except (ValueError, TypeError):
                     parsed_eps = None
