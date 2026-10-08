@@ -1,17 +1,5 @@
 [
   {
-    "id": "d76f1076",
-    "ticker": "GOOGL",
-    "target_price": 350.0,
-    "direction": "ABOVE",
-    "note": "",
-    "active": true,
-    "triggered": true,
-    "trigger_price": 350.04,
-    "created_at": "2026-10-04T15:50:40.859802",
-    "last_triggered_at": "2026-10-07T19:43:26.458735"
-  },
-  {
     "id": "cc0481c5",
     "ticker": "NFLX",
     "target_price": 84.0,
