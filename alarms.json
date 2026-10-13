@@ -48,15 +48,15 @@
     "last_triggered_at": null
   },
   {
-    "id": "5ecc167a",
+    "id": "5cc64d8f",
     "ticker": "GOOGL",
-    "target_price": 356.5,
+    "target_price": 358.0,
     "direction": "ABOVE",
     "note": "",
     "active": true,
-    "triggered": true,
-    "trigger_price": 356.52,
-    "created_at": "2026-10-08T13:34:00.406964",
-    "last_triggered_at": "2026-10-13T15:23:14.318320"
+    "triggered": false,
+    "trigger_price": null,
+    "created_at": "2026-10-13T15:24:35.170355",
+    "last_triggered_at": null
   }
 ]
