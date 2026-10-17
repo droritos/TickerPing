@@ -70,5 +70,17 @@
     "trigger_price": null,
     "created_at": "2026-10-17T09:58:46.366511",
     "last_triggered_at": null
+  },
+  {
+    "id": "ff0492c9",
+    "ticker": "QQQ",
+    "target_price": 695.0,
+    "direction": "BELOW",
+    "note": "",
+    "active": true,
+    "triggered": false,
+    "trigger_price": null,
+    "created_at": "2026-10-17T09:59:25.087960",
+    "last_triggered_at": null
   }
 ]
