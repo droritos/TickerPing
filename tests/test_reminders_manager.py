@@ -169,3 +169,106 @@ def test_reminder_manager_concurrent_adds(tmp_path):
     assert len(reminders) == num_threads * items_per_thread
     titles = {r["title"] for r in reminders}
     assert len(titles) == num_threads * items_per_thread
+
+
+def test_parse_reminder_input_singular_units():
+    base_time = datetime(2026, 10, 18, 14, 0, 0)
+    due_at, text = parse_reminder_input("in 1 hour call mom", now=base_time)
+    assert due_at == datetime(2026, 10, 18, 15, 0, 0)
+    assert text == "call mom"
+
+    due_at2, text2 = parse_reminder_input("1 minute check oven", now=base_time)
+    assert due_at2 == datetime(2026, 10, 18, 14, 1, 0)
+    assert text2 == "check oven"
+
+
+def test_parse_reminder_input_non_calendar_fallthrough():
+    base_time = datetime(2026, 10, 18, 14, 0, 0)
+    for text_input in ["3.5 star review", "5-6 apples to buy", "1/2 cup sugar"]:
+        due_at, text = parse_reminder_input(text_input, now=base_time)
+        assert due_at is None
+        assert text == text_input
+
+
+def test_parse_reminder_input_ampm():
+    base_time = datetime(2026, 10, 18, 14, 0, 0)
+    due_at, text = parse_reminder_input("8:30pm dinner", now=base_time)
+    assert due_at == datetime(2026, 10, 18, 20, 30, 0)
+    assert text == "dinner"
+
+    due_at2, text2 = parse_reminder_input("10:15am meeting", now=base_time)
+    # 10:15am has passed today at 14:00, so tomorrow 10:15
+    assert due_at2 == datetime(2026, 10, 19, 10, 15, 0)
+    assert text2 == "meeting"
+
+
+def test_reminder_manager_get_reminder(tmp_path):
+    storage = str(tmp_path / "reminders.json")
+    mgr = ReminderManager(storage_path=storage)
+    r = mgr.add_reminder("Buy milk")
+    found = mgr.get_reminder(r["id"])
+    assert found is not None
+    assert found["title"] == "Buy milk"
+
+    # Case insensitive lookup
+    assert mgr.get_reminder(r["id"].upper()) is not None
+
+    # Not found
+    assert mgr.get_reminder("nonexistent") is None
+
+
+def test_reminder_manager_snooze_resets_completed(tmp_path):
+    storage = str(tmp_path / "reminders.json")
+    mgr = ReminderManager(storage_path=storage)
+    base = datetime(2026, 10, 18, 15, 0, 0)
+    r = mgr.add_reminder("Task", due_at=base)
+    mgr.mark_completed(r["id"])
+    assert mgr.get_reminder(r["id"])["completed"] is True
+
+    snoozed = mgr.snooze_reminder(r["id"], minutes=15, now=base)
+    assert snoozed["completed"] is False
+    assert snoozed["completed_at"] is None
+
+
+def test_reminder_manager_mark_triggered_timestamp(tmp_path):
+    storage = str(tmp_path / "reminders.json")
+    mgr = ReminderManager(storage_path=storage)
+    base = datetime(2026, 10, 18, 15, 0, 0)
+    r = mgr.add_reminder("Alert", due_at=base)
+    assert r["last_triggered_at"] is None
+
+    mgr.mark_triggered(r["id"])
+    updated = mgr.get_reminder(r["id"])
+    assert updated["triggered"] is True
+    assert updated["last_triggered_at"] is not None
+
+
+def test_reminder_manager_title_fallback(tmp_path):
+    storage = str(tmp_path / "reminders.json")
+    mgr = ReminderManager(storage_path=storage)
+    r = mgr.add_reminder("   ")
+    assert r["title"] == "Reminder"
+
+
+def test_reminder_manager_data_loss_prevention(tmp_path):
+    import os
+    storage = str(tmp_path / "corrupted_reminders.json")
+    with open(storage, "w", encoding="utf-8") as f:
+        f.write("{this is not valid json")
+
+    mgr = ReminderManager(storage_path=storage)
+    with pytest.raises(IOError):
+        mgr.get_reminders()
+
+    # Backup file should have been created
+    bak_path = f"{storage}.bak"
+    assert os.path.exists(bak_path)
+    with open(bak_path, "r", encoding="utf-8") as f:
+        assert f.read() == "{this is not valid json"
+
+    # Mutating operation must also raise IOError and NOT wipe file
+    with pytest.raises(IOError):
+        mgr.add_reminder("New item")
+
+    with open(storage, "r", encoding="utf-8") as f:
+        assert f.read() == "{this is not valid json"
