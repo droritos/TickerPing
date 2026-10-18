@@ -3,10 +3,10 @@
     "id": "6c321abd",
     "title": "take cake 17:45",
     "due_at": null,
-    "completed": false,
+    "completed": true,
     "triggered": false,
     "created_at": "2026-10-18T12:46:40.299427",
-    "completed_at": null,
+    "completed_at": "2026-10-18T16:28:33.112971",
     "last_triggered_at": null,
     "note": ""
   },
