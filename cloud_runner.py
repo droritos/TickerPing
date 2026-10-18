@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import inspect
+import html
 from datetime import datetime
 import logging
 import subprocess
@@ -43,8 +44,8 @@ class CloudRunner:
             reminders_path = max_runtime_seconds
             max_runtime_seconds = 18000
 
-        self.max_runtime_seconds = max_runtime_seconds
-        self.loop_interval_seconds = loop_interval_seconds
+        self.max_runtime_seconds = int(max_runtime_seconds)
+        self.loop_interval_seconds = int(loop_interval_seconds)
         self.base_url = f"https://api.telegram.org/bot{token}"
         self.storage_path = storage_path
         self.state_path = state_path
@@ -68,21 +69,27 @@ class CloudRunner:
         if not hasattr(self.cmd_handler, "reminder_manager"):
             self.cmd_handler.reminder_manager = self.reminder_manager
 
-    def send_telegram_msg(self, chat_id: str, text: str, reply_markup: Optional[dict] = None):
+    def send_telegram_msg(self, chat_id: str, text: str, reply_markup: Optional[dict] = None) -> bool:
         if not self.token:
             logger.warning("No Telegram token configured; skipping send_telegram_msg.")
-            return
+            return False
         payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
         if reply_markup:
             payload["reply_markup"] = reply_markup
         try:
-            requests.post(
+            res = requests.post(
                 f"{self.base_url}/sendMessage",
                 json=payload,
                 timeout=15
             )
+            if res.status_code == 200 and res.json().get("ok"):
+                return True
+            else:
+                logger.error(f"Failed to send Telegram message, status {res.status_code}: {res.text}")
+                return False
         except Exception as e:
             logger.error(f"Failed to send Telegram message: {e}")
+            return False
 
     def answer_callback_query(self, callback_query_id: str, text: Optional[str] = None):
         if not self.token:
@@ -179,42 +186,51 @@ class CloudRunner:
         if not due_items:
             return
 
+        triggered_any = False
         for item in due_items:
-            rem_id = item.get("id", "")
-            title = item.get("title", "Reminder")
-            due_at_str = item.get("due_at", "")
-            time_display = due_at_str
-            if due_at_str:
-                try:
-                    dt = datetime.fromisoformat(due_at_str)
-                    time_display = dt.strftime("%Y-%m-%d %H:%M")
-                except Exception:
-                    time_display = str(due_at_str)
-            else:
-                time_display = "Now"
+            try:
+                rem_id = item.get("id", "")
+                raw_title = item.get("title", "Reminder")
+                title = html.escape(str(raw_title))
+                due_at_str = item.get("due_at", "")
+                time_display = due_at_str
+                if due_at_str:
+                    try:
+                        dt = datetime.fromisoformat(due_at_str)
+                        time_display = dt.strftime("%Y-%m-%d %H:%M")
+                    except Exception:
+                        time_display = html.escape(str(due_at_str))
+                else:
+                    time_display = "Now"
 
-            text = (
-                f"⏰ <b>REMINDER ALERT!</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"<b>{title}</b>\n"
-                f"🕒 <i>Scheduled for {time_display}</i>"
-            )
-            note = item.get("note", "").strip() if item.get("note") else ""
-            if note:
-                text += f"\n📝 <i>{note}</i>"
+                text = (
+                    f"⏰ <b>REMINDER ALERT!</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"<b>{title}</b>\n"
+                    f"🕒 <i>Scheduled for {time_display}</i>"
+                )
+                note = item.get("note", "").strip() if item.get("note") else ""
+                if note:
+                    text += f"\n📝 <i>{html.escape(note)}</i>"
 
-            reply_markup = {
-                "inline_keyboard": [
-                    [
-                        {"text": "✅ Done", "callback_data": f"task_done:{rem_id}"},
-                        {"text": "⏰ Snooze 10m", "callback_data": f"task_snooze:{rem_id}:10"},
-                        {"text": "⏰ Snooze 1h", "callback_data": f"task_snooze:{rem_id}:60"}
+                reply_markup = {
+                    "inline_keyboard": [
+                        [
+                            {"text": "✅ Done", "callback_data": f"task_done:{rem_id}"},
+                            {"text": "⏰ Snooze 10m", "callback_data": f"task_snooze:{rem_id}:10"},
+                            {"text": "⏰ Snooze 1h", "callback_data": f"task_snooze:{rem_id}:60"}
+                        ]
                     ]
-                ]
-            }
+                }
 
-            self.send_telegram_msg(self.chat_id, text, reply_markup=reply_markup)
-            self.reminder_manager.mark_triggered(rem_id)
+                sent = self.send_telegram_msg(self.chat_id, text, reply_markup=reply_markup)
+                if sent:
+                    self.reminder_manager.mark_triggered(rem_id)
+                    triggered_any = True
+            except Exception as e:
+                logger.error(f"Error processing reminder {item.get('id')}: {e}")
+
+        if triggered_any:
             self.git_sync_changes()
 
     def ensure_bot_avatar(self):
