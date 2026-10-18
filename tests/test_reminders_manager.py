@@ -135,3 +135,37 @@ def test_reminder_manager_snooze(tmp_path):
     assert snoozed is not None
     assert snoozed["triggered"] is False
     assert snoozed["due_at"] == (base + timedelta(minutes=10)).isoformat()
+
+
+def test_parse_reminder_input_invalid_time_fallback():
+    base_time = datetime(2026, 10, 18, 14, 0, 0)
+    due_at1, text1 = parse_reminder_input("25:00 Call doctor", now=base_time)
+    assert due_at1 is None
+    assert text1 == "25:00 Call doctor"
+
+    due_at2, text2 = parse_reminder_input("tomorrow 99:99 Meeting", now=base_time)
+    assert due_at2 is None
+    assert text2 == "tomorrow 99:99 Meeting"
+
+
+def test_reminder_manager_concurrent_adds(tmp_path):
+    import concurrent.futures
+
+    storage = str(tmp_path / "concurrent_reminders.json")
+    mgr = ReminderManager(storage_path=storage)
+
+    num_threads = 10
+    items_per_thread = 5
+
+    def worker(thread_idx):
+        for i in range(items_per_thread):
+            mgr.add_reminder(f"Task from thread {thread_idx} item {i}")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = [executor.submit(worker, t) for t in range(num_threads)]
+        concurrent.futures.wait(futures)
+
+    reminders = mgr.get_reminders(include_completed=True)
+    assert len(reminders) == num_threads * items_per_thread
+    titles = {r["title"] for r in reminders}
+    assert len(titles) == num_threads * items_per_thread

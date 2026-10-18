@@ -30,14 +30,17 @@ def parse_reminder_input(raw_text: str, now: Optional[datetime] = None) -> Tuple
     # 1. Relative duration: "in 25m", "25m", "10 min", "2h", "1.5h"
     rel_match = re.match(r"^(?:in\s+)?(\d+(?:\.\d+)?)\s*(m|min|mins|minutes|h|hr|hrs|hours)\b\s*(.*)$", text, re.IGNORECASE)
     if rel_match:
-        val = float(rel_match.group(1))
-        unit = rel_match.group(2).lower()
-        remainder = rel_match.group(3).strip()
-        if unit.startswith("m"):
-            due_at = now + timedelta(minutes=val)
-        else:
-            due_at = now + timedelta(hours=val)
-        return due_at, remainder
+        try:
+            val = float(rel_match.group(1))
+            unit = rel_match.group(2).lower()
+            remainder = rel_match.group(3).strip()
+            if unit.startswith("m"):
+                due_at = now + timedelta(minutes=val)
+            else:
+                due_at = now + timedelta(hours=val)
+            return due_at, remainder
+        except (ValueError, OverflowError):
+            pass
 
     # 2. "tomorrow" with optional time: "tomorrow 09:00 Buy milk", "tomorrow Buy milk"
     tom_match = re.match(r"^tomorrow(?:\s+at)?(?:\s+(\d{1,2}):(\d{2}))?\b\s*(.*)$", text, re.IGNORECASE)
@@ -47,9 +50,12 @@ def parse_reminder_input(raw_text: str, now: Optional[datetime] = None) -> Tuple
         remainder = tom_match.group(3).strip()
         hour = int(hour_str) if hour_str is not None else 9
         minute = int(min_str) if min_str is not None else 0
-        tomorrow = now + timedelta(days=1)
-        due_at = datetime(tomorrow.year, tomorrow.month, tomorrow.day, hour, minute, 0)
-        return due_at, remainder
+        try:
+            tomorrow = now + timedelta(days=1)
+            due_at = datetime(tomorrow.year, tomorrow.month, tomorrow.day, hour, minute, 0)
+            return due_at, remainder
+        except (ValueError, OverflowError):
+            pass
 
     # 3. Calendar date: "18/11 19:30 Wedding" or "18/11 Wedding"
     date_match = re.match(r"^(\d{1,2})[/\-\.](\d{1,2})(?:[/\-\.](\d{2,4}))?(?:\s+(?:at\s+)?(\d{1,2}):(\d{2}))?\b\s*(.*)$", text, re.IGNORECASE)
@@ -72,7 +78,7 @@ def parse_reminder_input(raw_text: str, now: Optional[datetime] = None) -> Tuple
             if not year_str and due_at < now:
                 due_at = datetime(year + 1, month, day, hour, minute, 0)
             return due_at, remainder
-        except ValueError:
+        except (ValueError, OverflowError):
             # Invalid date format, fall through
             pass
 
@@ -82,10 +88,13 @@ def parse_reminder_input(raw_text: str, now: Optional[datetime] = None) -> Tuple
         hour = int(time_match.group(1))
         minute = int(time_match.group(2))
         remainder = time_match.group(3).strip()
-        due_at = datetime(now.year, now.month, now.day, hour, minute, 0)
-        if due_at <= now:
-            due_at += timedelta(days=1)
-        return due_at, remainder
+        try:
+            due_at = datetime(now.year, now.month, now.day, hour, minute, 0)
+            if due_at <= now:
+                due_at += timedelta(days=1)
+            return due_at, remainder
+        except (ValueError, OverflowError):
+            pass
 
     # Untimed to-do item
     return None, text
@@ -96,15 +105,16 @@ class ReminderManager:
 
     def __init__(self, storage_path: str = "reminders.json") -> None:
         self.storage_path = storage_path
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._ensure_file_exists()
 
     def _ensure_file_exists(self) -> None:
-        if not os.path.exists(self.storage_path):
-            directory = os.path.dirname(self.storage_path)
-            if directory and not os.path.exists(directory):
-                os.makedirs(directory, exist_ok=True)
-            self._write_file([])
+        with self._lock:
+            if not os.path.exists(self.storage_path):
+                directory = os.path.dirname(self.storage_path)
+                if directory and not os.path.exists(directory):
+                    os.makedirs(directory, exist_ok=True)
+                self._write_file([])
 
     def _read_file(self) -> List[Dict[str, Any]]:
         with self._lock:
@@ -151,70 +161,76 @@ class ReminderManager:
             "completed_at": None,
             "note": note.strip()
         }
-        items = self._read_file()
-        items.append(item)
-        self._write_file(items)
+        with self._lock:
+            items = self._read_file()
+            items.append(item)
+            self._write_file(items)
         return item
 
     def get_reminders(self, include_completed: bool = False) -> List[Dict[str, Any]]:
-        items = self._read_file()
-        if include_completed:
-            return items
-        return [i for i in items if not i.get("completed", False)]
+        with self._lock:
+            items = self._read_file()
+            if include_completed:
+                return items
+            return [i for i in items if not i.get("completed", False)]
 
     def get_due_reminders(self, now: Optional[datetime] = None) -> List[Dict[str, Any]]:
         if now is None:
             now = datetime.now()
-        items = self.get_reminders(include_completed=False)
-        due = []
-        for i in items:
-            due_at_str = i.get("due_at")
-            if not due_at_str or i.get("triggered", False):
-                continue
-            try:
-                due_dt = datetime.fromisoformat(due_at_str)
-                if due_dt <= now:
-                    due.append(i)
-            except Exception:
-                continue
-        return due
+        with self._lock:
+            items = self.get_reminders(include_completed=False)
+            due = []
+            for i in items:
+                due_at_str = i.get("due_at")
+                if not due_at_str or i.get("triggered", False):
+                    continue
+                try:
+                    due_dt = datetime.fromisoformat(due_at_str)
+                    if due_dt <= now:
+                        due.append(i)
+                except Exception:
+                    continue
+            return due
 
     def mark_completed(self, reminder_id: str) -> bool:
         clean_id = str(reminder_id).strip().lower()
-        items = self._read_file()
-        found = False
-        for i in items:
-            if str(i.get("id", "")).strip().lower() == clean_id:
-                i["completed"] = True
-                i["completed_at"] = datetime.now().isoformat()
-                found = True
-                break
-        if found:
-            self._write_file(items)
-        return found
+        with self._lock:
+            items = self._read_file()
+            found = False
+            for i in items:
+                if str(i.get("id", "")).strip().lower() == clean_id:
+                    i["completed"] = True
+                    i["completed_at"] = datetime.now().isoformat()
+                    found = True
+                    break
+            if found:
+                self._write_file(items)
+            return found
 
     def mark_triggered(self, reminder_id: str) -> bool:
         clean_id = str(reminder_id).strip().lower()
-        items = self._read_file()
-        found = False
-        for i in items:
-            if str(i.get("id", "")).strip().lower() == clean_id:
-                i["triggered"] = True
-                found = True
-                break
-        if found:
-            self._write_file(items)
-        return found
+        with self._lock:
+            items = self._read_file()
+            found = False
+            for i in items:
+                if str(i.get("id", "")).strip().lower() == clean_id:
+                    i["triggered"] = True
+                    found = True
+                    break
+            if found:
+                self._write_file(items)
+            return found
 
     def delete_reminder(self, reminder_id: str) -> bool:
         clean_id = str(reminder_id).strip().lower()
-        items = self._read_file()
-        initial_len = len(items)
-        items = [i for i in items if str(i.get("id", "")).strip().lower() != clean_id]
-        if len(items) < initial_len:
-            self._write_file(items)
-            return True
-        return False
+        with self._lock:
+            items = self._read_file()
+            initial_len = len(items)
+            items = [i for i in items if str(i.get("id", "")).strip().lower() != clean_id]
+            if len(items) < initial_len:
+                self._write_file(items)
+                return True
+            return False
 
     def snooze_reminder(
         self,
@@ -225,15 +241,16 @@ class ReminderManager:
         if now is None:
             now = datetime.now()
         clean_id = str(reminder_id).strip().lower()
-        items = self._read_file()
-        target = None
-        for i in items:
-            if str(i.get("id", "")).strip().lower() == clean_id:
-                new_due = now + timedelta(minutes=minutes)
-                i["due_at"] = new_due.isoformat()
-                i["triggered"] = False
-                target = i
-                break
-        if target:
-            self._write_file(items)
-        return target
+        with self._lock:
+            items = self._read_file()
+            target = None
+            for i in items:
+                if str(i.get("id", "")).strip().lower() == clean_id:
+                    new_due = now + timedelta(minutes=minutes)
+                    i["due_at"] = new_due.isoformat()
+                    i["triggered"] = False
+                    target = i
+                    break
+            if target:
+                self._write_file(items)
+            return target
