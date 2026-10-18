@@ -15,10 +15,10 @@
     "title": "check me",
     "due_at": "2026-10-18T14:08:33.148673",
     "completed": false,
-    "triggered": false,
+    "triggered": true,
     "created_at": "2026-10-18T14:07:33.149093",
     "completed_at": null,
-    "last_triggered_at": null,
+    "last_triggered_at": "2026-10-18T14:09:22.789458",
     "note": ""
   }
 ]
