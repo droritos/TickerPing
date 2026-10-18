@@ -7,6 +7,8 @@ polling Telegram commands, replying to user messages, and checking active alarms
 import os
 import sys
 import time
+import inspect
+from datetime import datetime
 import logging
 import subprocess
 import requests
@@ -18,6 +20,7 @@ from notifier import TelegramNotifier
 from alarms_manager import AlarmManager
 from bot_state import BotStateManager
 from telegram_command_handler import TelegramCommandHandler
+from reminders_manager import ReminderManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("CloudRunner")
@@ -30,25 +33,40 @@ class CloudRunner:
         storage_path: str = "alarms.json",
         state_path: str = "bot_state.json",
         max_runtime_seconds: int = 18000,
-        loop_interval_seconds: int = 60
+        loop_interval_seconds: int = 60,
+        reminders_path: str = "reminders.json"
     ):
         self.token = token
         self.chat_id = chat_id
+        # In case max_runtime_seconds was passed as a reminders_path string positionally
+        if isinstance(max_runtime_seconds, str) and (max_runtime_seconds.endswith(".json") or not max_runtime_seconds.isdigit()):
+            reminders_path = max_runtime_seconds
+            max_runtime_seconds = 18000
+
         self.max_runtime_seconds = max_runtime_seconds
         self.loop_interval_seconds = loop_interval_seconds
         self.base_url = f"https://api.telegram.org/bot{token}"
         self.storage_path = storage_path
         self.state_path = state_path
+        self.reminders_path = reminders_path
         self.alarm_manager = AlarmManager(storage_path=storage_path)
         self.state_manager = BotStateManager(storage_path=state_path)
+        self.reminder_manager = ReminderManager(storage_path=reminders_path)
         self.engine = StockEngine()
         self.notifier = TelegramNotifier(bot_token=token, chat_id=chat_id)
-        self.cmd_handler = TelegramCommandHandler(
-            alarm_manager=self.alarm_manager,
-            engine=self.engine,
-            send_msg_fn=self.send_telegram_msg,
-            answer_cb_fn=self.answer_callback_query
-        )
+
+        cmd_kwargs = {
+            "alarm_manager": self.alarm_manager,
+            "engine": self.engine,
+            "send_msg_fn": self.send_telegram_msg,
+            "answer_cb_fn": self.answer_callback_query
+        }
+        sig = inspect.signature(TelegramCommandHandler.__init__)
+        if "reminder_manager" in sig.parameters:
+            cmd_kwargs["reminder_manager"] = self.reminder_manager
+        self.cmd_handler = TelegramCommandHandler(**cmd_kwargs)
+        if not hasattr(self.cmd_handler, "reminder_manager"):
+            self.cmd_handler.reminder_manager = self.reminder_manager
 
     def send_telegram_msg(self, chat_id: str, text: str, reply_markup: Optional[dict] = None):
         if not self.token:
@@ -109,16 +127,16 @@ class CloudRunner:
             return False
 
     def git_sync_changes(self):
-        """Sync alarms.json and bot_state.json to GitHub if running inside GitHub Actions."""
+        """Sync alarms.json, bot_state.json, and reminders.json to GitHub if running inside GitHub Actions."""
         if os.getenv("GITHUB_ACTIONS") != "true":
             return
         try:
             subprocess.run(["git", "config", "user.name", "github-actions[bot]"], check=False)
             subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], check=False)
-            subprocess.run(["git", "add", self.storage_path, self.state_path], check=False)
+            subprocess.run(["git", "add", self.storage_path, self.state_path, self.reminders_path], check=False)
             diff = subprocess.run(["git", "diff", "--staged", "--quiet"], check=False)
             if diff.returncode != 0:
-                subprocess.run(["git", "commit", "-m", "chore: sync alarms and bot state [skip ci]"], check=False)
+                subprocess.run(["git", "commit", "-m", "chore: sync alarms, reminders, and bot state [skip ci]"], check=False)
                 subprocess.run(["git", "push"], check=False)
                 logger.info("Auto-synced state changes to git.")
         except Exception as e:
@@ -155,6 +173,49 @@ class CloudRunner:
                 )
                 self.alarm_manager.mark_triggered(alarm["id"], trigger_price=quote.price)
                 self.git_sync_changes()
+
+    def evaluate_due_reminders(self):
+        due_items = self.reminder_manager.get_due_reminders()
+        if not due_items:
+            return
+
+        for item in due_items:
+            rem_id = item.get("id", "")
+            title = item.get("title", "Reminder")
+            due_at_str = item.get("due_at", "")
+            time_display = due_at_str
+            if due_at_str:
+                try:
+                    dt = datetime.fromisoformat(due_at_str)
+                    time_display = dt.strftime("%Y-%m-%d %H:%M")
+                except Exception:
+                    time_display = str(due_at_str)
+            else:
+                time_display = "Now"
+
+            text = (
+                f"⏰ <b>REMINDER ALERT!</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"<b>{title}</b>\n"
+                f"🕒 <i>Scheduled for {time_display}</i>"
+            )
+            note = item.get("note", "").strip() if item.get("note") else ""
+            if note:
+                text += f"\n📝 <i>{note}</i>"
+
+            reply_markup = {
+                "inline_keyboard": [
+                    [
+                        {"text": "✅ Done", "callback_data": f"task_done:{rem_id}"},
+                        {"text": "⏰ Snooze 10m", "callback_data": f"task_snooze:{rem_id}:10"},
+                        {"text": "⏰ Snooze 1h", "callback_data": f"task_snooze:{rem_id}:60"}
+                    ]
+                ]
+            }
+
+            self.send_telegram_msg(self.chat_id, text, reply_markup=reply_markup)
+            self.reminder_manager.mark_triggered(rem_id)
+            self.git_sync_changes()
 
     def ensure_bot_avatar(self):
         """Automatically set the bot profile photo in Telegram if not already configured."""
@@ -196,10 +257,11 @@ class CloudRunner:
             # 1. Telegram Updates (fast long-poll: returns immediately on message)
             had_updates = self.poll_telegram_updates()
 
-            # 2. Stock Alarm Check every `loop_interval_seconds`
+            # 2. Stock & Reminder Check every `loop_interval_seconds`
             if (now - last_stock_check) >= self.loop_interval_seconds:
-                logger.info(f"--- Running stock evaluation cycle #{cycles + 1} (Elapsed: {elapsed:.1f}s) ---")
+                logger.info(f"--- Running evaluation cycle #{cycles + 1} (Elapsed: {elapsed:.1f}s) ---")
                 self.evaluate_active_alarms()
+                self.evaluate_due_reminders()
                 last_stock_check = time.time()
                 cycles += 1
 
@@ -223,6 +285,7 @@ if __name__ == "__main__":
     cfg = load_config()
     storage = os.getenv("DATA_FILE_PATH", cfg.data_file)
     state = os.getenv("STATE_FILE_PATH", "bot_state.json")
+    reminders = os.getenv("REMINDERS_FILE_PATH", "reminders.json")
     max_runtime = int(os.getenv("MAX_RUNTIME_SECONDS", "18000"))
     interval = int(os.getenv("LOOP_INTERVAL_SECONDS", "60"))
 
@@ -231,6 +294,7 @@ if __name__ == "__main__":
         chat_id=cfg.telegram_chat_id,
         storage_path=storage,
         state_path=state,
+        reminders_path=reminders,
         max_runtime_seconds=max_runtime,
         loop_interval_seconds=interval
     )

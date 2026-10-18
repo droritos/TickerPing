@@ -130,3 +130,82 @@ def test_git_sync_changes_executes_when_github_actions(tmp_path, monkeypatch):
         assert mock_run.call_count >= 3
 
 
+def test_cloud_runner_evaluates_due_reminders(tmp_path):
+    alarms_file = str(tmp_path / "alarms.json")
+    state_file = str(tmp_path / "bot_state.json")
+    reminders_file = str(tmp_path / "reminders.json")
+
+    runner = CloudRunner(
+        token="test_token",
+        chat_id="12345",
+        storage_path=alarms_file,
+        state_path=state_file,
+        reminders_path=reminders_file
+    )
+
+    runner.send_telegram_msg = MagicMock()
+    runner.git_sync_changes = MagicMock()
+    runner.reminder_manager = MagicMock()
+    runner.reminder_manager.get_due_reminders.return_value = [
+        {"id": "rem_1", "title": "Check the oven", "due_at": "2026-10-18T14:30:00"}
+    ]
+
+    runner.evaluate_due_reminders()
+
+    runner.send_telegram_msg.assert_called_once()
+    call_args = runner.send_telegram_msg.call_args
+    assert "Check the oven" in call_args[0][1]
+    assert "reply_markup" in call_args[1]
+    markup = call_args[1]["reply_markup"]
+    assert "inline_keyboard" in markup
+    # Check buttons
+    buttons = [b["callback_data"] for row in markup["inline_keyboard"] for b in row]
+    assert "task_done:rem_1" in buttons
+    assert "task_snooze:rem_1:10" in buttons
+    assert "task_snooze:rem_1:60" in buttons
+
+    runner.reminder_manager.mark_triggered.assert_called_with("rem_1")
+    runner.git_sync_changes.assert_called_once()
+
+
+def test_git_sync_changes_includes_reminders(tmp_path, monkeypatch):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    alarms_file = str(tmp_path / "alarms.json")
+    state_file = str(tmp_path / "bot_state.json")
+    reminders_file = str(tmp_path / "reminders.json")
+    runner = CloudRunner("tok", "123", alarms_file, state_file, reminders_path=reminders_file)
+
+    mock_diff = MagicMock()
+    mock_diff.returncode = 1
+
+    with patch("subprocess.run", return_value=mock_diff) as mock_run:
+        runner.git_sync_changes()
+        # Verify git add call includes reminders_file
+        add_call = [call for call in mock_run.call_args_list if call[0][0][:2] == ["git", "add"]][0]
+        assert reminders_file in add_call[0][0]
+
+
+def test_cloud_runner_run_calls_evaluate_due_reminders(tmp_path):
+    alarms_file = str(tmp_path / "alarms.json")
+    state_file = str(tmp_path / "bot_state.json")
+    reminders_file = str(tmp_path / "reminders.json")
+
+    runner = CloudRunner(
+        token="test_token",
+        chat_id="12345",
+        storage_path=alarms_file,
+        state_path=state_file,
+        reminders_path=reminders_file,
+        max_runtime_seconds=1,
+        loop_interval_seconds=1
+    )
+
+    with patch.object(runner, "poll_telegram_updates"), \
+         patch.object(runner, "evaluate_active_alarms"), \
+         patch.object(runner, "evaluate_due_reminders") as mock_eval:
+        runner.run()
+        assert mock_eval.call_count >= 1
+
+
+
+
