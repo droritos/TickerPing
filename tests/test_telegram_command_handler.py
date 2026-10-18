@@ -1096,6 +1096,157 @@ def test_constructor_default_reminder_manager(alarm_mgr, mock_engine, monkeypatc
     assert isinstance(h.reminder_manager, ReminderManager)
 
 
+def test_todo_command_empty(handler, reminder_mgr, sent_messages):
+    update = {
+        "update_id": 315,
+        "message": {
+            "chat": {"id": 1438330510},
+            "text": "/todo"
+        }
+    }
+    handled = handler.handle_update(update)
+    assert handled is True
+    assert len(sent_messages) == 1
+    assert "How to add a to-do" in sent_messages[0][1]
+    assert len(reminder_mgr.get_reminders()) == 0
+
+
+def test_callback_task_nonexistent_ids(handler, sent_messages):
+    callback_answers = []
+    handler.answer_cb = lambda query_id, text: callback_answers.append((query_id, text))
+
+    # 1. task_done on nonexistent
+    q1 = {
+        "id": "cb_none_done",
+        "data": "task_done:nonexistent",
+        "message": {"chat": {"id": 1438330510}}
+    }
+    assert handler.handle_callback_query(q1) is True
+    assert "Task not found." in callback_answers[-1][1]
+    assert len(sent_messages) == 0
+
+    # 2. task_del on nonexistent
+    q2 = {
+        "id": "cb_none_del",
+        "data": "task_del:nonexistent",
+        "message": {"chat": {"id": 1438330510}}
+    }
+    assert handler.handle_callback_query(q2) is True
+    assert "Task not found." in callback_answers[-1][1]
+    assert len(sent_messages) == 0
+
+    # 3. task_snooze on nonexistent
+    q3 = {
+        "id": "cb_none_snooze",
+        "data": "task_snooze:nonexistent:10",
+        "message": {"chat": {"id": 1438330510}}
+    }
+    assert handler.handle_callback_query(q3) is True
+    assert "Task not found." in callback_answers[-1][1]
+    assert len(sent_messages) == 0
+
+
+def test_callback_task_done_idempotent(handler, reminder_mgr, sent_messages):
+    callback_answers = []
+    handler.answer_cb = lambda query_id, text: callback_answers.append((query_id, text))
+
+    item = reminder_mgr.add_reminder("Idempotent task")
+    q = {
+        "id": "cb_done_idem_1",
+        "data": f"task_done:{item['id']}",
+        "message": {"chat": {"id": 1438330510}}
+    }
+    # First invocation completes task and sends 1 message
+    assert handler.handle_callback_query(q) is True
+    assert len(sent_messages) == 1
+    assert "Completed" in sent_messages[0][1]
+    assert "Idempotent task" in callback_answers[0][1]
+
+    # Second invocation should be idempotent: no second chat message
+    q2 = {
+        "id": "cb_done_idem_2",
+        "data": f"task_done:{item['id']}",
+        "message": {"chat": {"id": 1438330510}}
+    }
+    assert handler.handle_callback_query(q2) is True
+    assert len(sent_messages) == 1  # No duplicate message sent
+    assert "Task already completed." in callback_answers[1][1]
+
+
+def test_callback_task_snooze_malformed_and_clamping(handler, reminder_mgr, sent_messages):
+    callback_answers = []
+    handler.answer_cb = lambda query_id, text: callback_answers.append((query_id, text))
+
+    item = reminder_mgr.add_reminder("Snooze check")
+
+    # 1. Invalid non-integer minute string -> fallbacks to 10m
+    q1 = {
+        "id": "cb_snz_invalid",
+        "data": f"task_snooze:{item['id']}:invalid",
+        "message": {"chat": {"id": 1438330510}}
+    }
+    assert handler.handle_callback_query(q1) is True
+    assert "10m" in callback_answers[-1][1]
+
+    # 2. Non-positive minute (<= 0) -> fallbacks to 10m
+    q2 = {
+        "id": "cb_snz_neg",
+        "data": f"task_snooze:{item['id']}:-5",
+        "message": {"chat": {"id": 1438330510}}
+    }
+    assert handler.handle_callback_query(q2) is True
+    assert "10m" in callback_answers[-1][1]
+
+    # 3. Excessive minutes (> 525600) -> fallbacks to 10m
+    q3 = {
+        "id": "cb_snz_huge",
+        "data": f"task_snooze:{item['id']}:9999999",
+        "message": {"chat": {"id": 1438330510}}
+    }
+    assert handler.handle_callback_query(q3) is True
+    assert "10m" in callback_answers[-1][1]
+
+
+def test_callback_toast_length_truncation(handler, reminder_mgr, sent_messages):
+    callback_answers = []
+    handler.answer_cb = lambda query_id, text: callback_answers.append((query_id, text))
+
+    long_title = "Super long reminder title that exceeds standard limits " * 5  # >250 chars
+    item = reminder_mgr.add_reminder(long_title)
+
+    # Done toast
+    q1 = {
+        "id": "cb_trunc_done",
+        "data": f"task_done:{item['id']}",
+        "message": {"chat": {"id": 1438330510}}
+    }
+    assert handler.handle_callback_query(q1) is True
+    assert len(callback_answers[0][1]) <= 200
+    assert callback_answers[0][1].endswith("…")
+
+    # Snooze toast
+    item2 = reminder_mgr.add_reminder(long_title)
+    q2 = {
+        "id": "cb_trunc_snz",
+        "data": f"task_snooze:{item2['id']}:15",
+        "message": {"chat": {"id": 1438330510}}
+    }
+    assert handler.handle_callback_query(q2) is True
+    assert len(callback_answers[1][1]) <= 200
+    assert callback_answers[1][1].endswith("…")
+
+    # Del toast
+    q3 = {
+        "id": "cb_trunc_del",
+        "data": f"task_del:{item2['id']}",
+        "message": {"chat": {"id": 1438330510}}
+    }
+    assert handler.handle_callback_query(q3) is True
+    assert len(callback_answers[2][1]) <= 200
+    assert callback_answers[2][1].endswith("…")
+
+
+
 
 
 

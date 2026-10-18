@@ -59,6 +59,20 @@ class TelegramCommandHandler:
         except TypeError:
             self.send_msg(chat_id, text)
 
+    def _format_due_display(self, due_at_str: str) -> str:
+        """Helper to format an ISO due datetime string into a human-friendly display."""
+        try:
+            due_dt = datetime.fromisoformat(due_at_str)
+            now = datetime.now()
+            if due_dt.date() == now.date():
+                return f"Today at {due_dt.strftime('%H:%M')}"
+            elif due_dt.date() == (now + timedelta(days=1)).date():
+                return f"Tomorrow at {due_dt.strftime('%H:%M')}"
+            else:
+                return due_dt.strftime("%d/%m/%Y %H:%M")
+        except Exception:
+            return str(due_at_str)
+
     def handle_update(self, update: Dict[str, Any]) -> bool:
         """
         Process a Telegram update dictionary.
@@ -268,33 +282,50 @@ class TelegramCommandHandler:
         elif data.startswith("task_done:"):
             task_id = data.split(":", 1)[1].strip()
             task = self.reminder_manager.get_reminder(task_id)
-            title = task.get("title", "Task") if task else "Task"
+            if not task:
+                if self.answer_cb:
+                    self.answer_cb(query_id, "Task not found.")
+                return True
+
+            if task.get("completed"):
+                if self.answer_cb:
+                    self.answer_cb(query_id, "Task already completed.")
+                return True
+
+            title = task.get("title", "Task")
+            toast_title = (title[:150] + "…") if len(title) > 150 else title
             escaped_title = html.escape(title)
             success = self.reminder_manager.mark_completed(task_id)
             if success:
                 if self.answer_cb:
-                    self.answer_cb(query_id, f"✅ Completed: {title}")
+                    self.answer_cb(query_id, f"✅ Completed: {toast_title}")
                 if chat_id:
                     self._send(chat_id, f"✅ Completed: <b>{escaped_title}</b>", reply_markup=MAIN_MENU_KEYBOARD)
             else:
                 if self.answer_cb:
-                    self.answer_cb(query_id, "Task already completed or not found.")
+                    self.answer_cb(query_id, "Task already completed.")
             return True
 
         elif data.startswith("task_del:"):
             task_id = data.split(":", 1)[1].strip()
             task = self.reminder_manager.get_reminder(task_id)
-            title = task.get("title", "Task") if task else "Task"
+            if not task:
+                if self.answer_cb:
+                    self.answer_cb(query_id, "Task not found.")
+                return True
+
+            title = task.get("title", "Task")
+            toast_title = (title[:150] + "…") if len(title) > 150 else title
             escaped_title = html.escape(title)
             success = self.reminder_manager.delete_reminder(task_id)
             if success:
                 if self.answer_cb:
-                    self.answer_cb(query_id, f"🗑️ Deleted: {title}")
+                    self.answer_cb(query_id, f"🗑️ Deleted: {toast_title}")
                 if chat_id:
                     self._send(chat_id, f"🗑️ Deleted task: <b>{escaped_title}</b>", reply_markup=MAIN_MENU_KEYBOARD)
             else:
                 if self.answer_cb:
-                    self.answer_cb(query_id, "Task already deleted or not found.")
+                    self.answer_cb(query_id, "Task not found.")
             return True
 
         elif data.startswith("task_snooze:"):
@@ -303,7 +334,9 @@ class TelegramCommandHandler:
                 task_id = parts[1].strip()
                 try:
                     mins = int(parts[2].strip())
-                except ValueError:
+                    if mins <= 0 or mins > 525600:
+                        mins = 10
+                except (ValueError, OverflowError):
                     mins = 10
             elif len(parts) == 2:
                 task_id = parts[1].strip()
@@ -316,9 +349,10 @@ class TelegramCommandHandler:
             task = self.reminder_manager.snooze_reminder(task_id, minutes=mins)
             if task:
                 title = task.get("title", "Task")
+                toast_title = (title[:150] + "…") if len(title) > 150 else title
                 escaped_title = html.escape(title)
                 if self.answer_cb:
-                    self.answer_cb(query_id, f"💤 Snoozed for {mins}m: {title}")
+                    self.answer_cb(query_id, f"💤 Snoozed for {mins}m: {toast_title}")
                 if chat_id:
                     self._send(chat_id, f"💤 Snoozed for {mins}m: <b>{escaped_title}</b>", reply_markup=MAIN_MENU_KEYBOARD)
             else:
@@ -380,18 +414,7 @@ class TelegramCommandHandler:
         escaped_title = html.escape(item["title"])
 
         if item.get("due_at"):
-            try:
-                due_dt = datetime.fromisoformat(item["due_at"])
-                now = datetime.now()
-                if due_dt.date() == now.date():
-                    due_display = f"Today at {due_dt.strftime('%H:%M')}"
-                elif due_dt.date() == (now + timedelta(days=1)).date():
-                    due_display = f"Tomorrow at {due_dt.strftime('%H:%M')}"
-                else:
-                    due_display = due_dt.strftime("%d/%m/%Y %H:%M")
-            except Exception:
-                due_display = str(item["due_at"])
-
+            due_display = self._format_due_display(item["due_at"])
             msg = (
                 f"⏰ <b>Reminder Set!</b>\n\n"
                 f"📌 <b>Task:</b> {escaped_title}\n"
@@ -427,18 +450,7 @@ class TelegramCommandHandler:
         escaped_title = html.escape(item["title"])
 
         if item.get("due_at"):
-            try:
-                due_dt = datetime.fromisoformat(item["due_at"])
-                now = datetime.now()
-                if due_dt.date() == now.date():
-                    due_display = f"Today at {due_dt.strftime('%H:%M')}"
-                elif due_dt.date() == (now + timedelta(days=1)).date():
-                    due_display = f"Tomorrow at {due_dt.strftime('%H:%M')}"
-                else:
-                    due_display = due_dt.strftime("%d/%m/%Y %H:%M")
-            except Exception:
-                due_display = str(item["due_at"])
-
+            due_display = self._format_due_display(item["due_at"])
             msg = (
                 f"⏰ <b>Reminder Set!</b>\n\n"
                 f"📌 <b>Task:</b> {escaped_title}\n"
