@@ -1,8 +1,11 @@
+import inspect
+from datetime import datetime, timedelta
 import pytest
 from unittest.mock import MagicMock
 from alarms_manager import AlarmManager
 from engine import Quote
-from telegram_command_handler import TelegramCommandHandler
+from reminders_manager import ReminderManager
+from telegram_command_handler import TelegramCommandHandler, MAIN_MENU_KEYBOARD
 
 
 @pytest.fixture
@@ -26,21 +29,41 @@ def alarm_mgr(tmp_path):
 
 
 @pytest.fixture
+def reminder_mgr(tmp_path):
+    storage = str(tmp_path / "test_reminders.json")
+    return ReminderManager(storage_path=storage)
+
+
+@pytest.fixture
 def sent_messages():
     messages = []
     return messages
 
 
 @pytest.fixture
-def handler(mock_engine, alarm_mgr, sent_messages):
-    def send_fn(chat_id: str, text: str):
-        sent_messages.append((chat_id, text))
+def sent_markups():
+    markups = []
+    return markups
 
-    return TelegramCommandHandler(
-        alarm_manager=alarm_mgr,
-        engine=mock_engine,
-        send_msg_fn=send_fn
-    )
+
+@pytest.fixture
+def handler(mock_engine, alarm_mgr, reminder_mgr, sent_messages, sent_markups):
+    def send_fn(chat_id: str, text: str, reply_markup=None):
+        sent_messages.append((chat_id, text))
+        sent_markups.append(reply_markup)
+
+    kwargs = {
+        "alarm_manager": alarm_mgr,
+        "engine": mock_engine,
+        "send_msg_fn": send_fn
+    }
+    sig = inspect.signature(TelegramCommandHandler.__init__)
+    if "reminder_manager" in sig.parameters:
+        kwargs["reminder_manager"] = reminder_mgr
+    h = TelegramCommandHandler(**kwargs)
+    if hasattr(h, "reminder_manager"):
+        h.reminder_manager = reminder_mgr
+    return h
 
 
 # 1. Shorthand set: AAPL 250 -> smart ABOVE; AAPL 200 -> smart BELOW
@@ -837,6 +860,242 @@ def test_earnings_command_singular_day_and_negative_eps(handler, mock_engine, se
     assert "Countdown:</b> 1 day" in msg
     assert "(in 1 day)" in msg
     assert "-$0.35" in msg
+
+
+# ---------------------------------------------------------------------------
+# Tasks & Reminders Tests (Task 3)
+# ---------------------------------------------------------------------------
+
+def test_remind_command_timed(handler, reminder_mgr, sent_messages):
+    update = {
+        "update_id": 301,
+        "message": {
+            "chat": {"id": 1438330510},
+            "text": "/remind 25m Check oven"
+        }
+    }
+    handled = handler.handle_update(update)
+    assert handled is True
+    assert len(sent_messages) == 1
+    assert "Reminder Set" in sent_messages[0][1]
+    assert "Check oven" in sent_messages[0][1]
+
+    reminders = reminder_mgr.get_reminders()
+    assert len(reminders) == 1
+    assert reminders[0]["title"] == "Check oven"
+    assert reminders[0]["due_at"] is not None
+
+
+def test_remind_command_empty(handler, reminder_mgr, sent_messages):
+    update = {
+        "update_id": 302,
+        "message": {
+            "chat": {"id": 1438330510},
+            "text": "/remind"
+        }
+    }
+    handled = handler.handle_update(update)
+    assert handled is True
+    assert len(sent_messages) == 1
+    assert "/remind 25m" in sent_messages[0][1] or "How to set a reminder" in sent_messages[0][1]
+    assert len(reminder_mgr.get_reminders()) == 0
+
+
+def test_todo_command_untimed(handler, reminder_mgr, sent_messages):
+    update = {
+        "update_id": 303,
+        "message": {
+            "chat": {"id": 1438330510},
+            "text": "/todo Buy almond milk"
+        }
+    }
+    handled = handler.handle_update(update)
+    assert handled is True
+    assert len(sent_messages) == 1
+    assert "Buy almond milk" in sent_messages[0][1]
+    reminders = reminder_mgr.get_reminders()
+    assert len(reminders) == 1
+    assert reminders[0]["title"] == "Buy almond milk"
+    assert reminders[0]["due_at"] is None
+
+
+def test_todo_command_with_time(handler, reminder_mgr, sent_messages):
+    update = {
+        "update_id": 304,
+        "message": {
+            "chat": {"id": 1438330510},
+            "text": "/todo tomorrow 09:00 Meeting"
+        }
+    }
+    handled = handler.handle_update(update)
+    assert handled is True
+    assert len(sent_messages) == 1
+    assert "Meeting" in sent_messages[0][1]
+    reminders = reminder_mgr.get_reminders()
+    assert len(reminders) == 1
+    assert reminders[0]["title"] == "Meeting"
+    assert reminders[0]["due_at"] is not None
+
+
+def test_tasks_list_command_empty(handler, sent_messages):
+    update = {
+        "update_id": 305,
+        "message": {
+            "chat": {"id": 1438330510},
+            "text": "/tasks"
+        }
+    }
+    handled = handler.handle_update(update)
+    assert handled is True
+    assert len(sent_messages) == 1
+    assert "no pending tasks" in sent_messages[0][1].lower() or "no tasks" in sent_messages[0][1].lower()
+
+
+def test_tasks_list_command_populated(handler, reminder_mgr, sent_messages, sent_markups):
+    r1 = reminder_mgr.add_reminder("Buy milk")
+    r2 = reminder_mgr.add_reminder("Call doctor", due_at=datetime.now() + timedelta(hours=2))
+    update = {
+        "update_id": 306,
+        "message": {
+            "chat": {"id": 1438330510},
+            "text": "/tasks"
+        }
+    }
+    handled = handler.handle_update(update)
+    assert handled is True
+    assert len(sent_messages) == 1
+    assert "Buy milk" in sent_messages[0][1]
+    assert "Call doctor" in sent_messages[0][1]
+
+    # Check inline keyboard
+    markup = sent_markups[0]
+    assert markup is not None
+    assert "inline_keyboard" in markup
+    keyboard = markup["inline_keyboard"]
+    assert len(keyboard) == 2
+    # Row 1 buttons: Done #1 and Del #1
+    assert keyboard[0][0]["callback_data"] == f"task_done:{r1['id']}"
+    assert keyboard[0][1]["callback_data"] == f"task_del:{r1['id']}"
+    # Row 2 buttons: Done #2 and Del #2
+    assert keyboard[1][0]["callback_data"] == f"task_done:{r2['id']}"
+    assert keyboard[1][1]["callback_data"] == f"task_del:{r2['id']}"
+
+
+def test_callback_task_done(handler, reminder_mgr, sent_messages):
+    callback_answers = []
+    handler.answer_cb = lambda query_id, text: callback_answers.append((query_id, text))
+    item = reminder_mgr.add_reminder("Wash car")
+    query = {
+        "id": "cb_task_done_1",
+        "data": f"task_done:{item['id']}",
+        "message": {"chat": {"id": 1438330510}}
+    }
+    handled = handler.handle_callback_query(query)
+    assert handled is True
+    assert len(callback_answers) == 1
+    assert "Wash car" in callback_answers[0][1]
+    assert len(sent_messages) == 1
+    assert "Wash car" in sent_messages[0][1]
+    assert "Completed" in sent_messages[0][1]
+    updated = reminder_mgr.get_reminder(item["id"])
+    assert updated["completed"] is True
+
+
+def test_callback_task_del(handler, reminder_mgr, sent_messages):
+    callback_answers = []
+    handler.answer_cb = lambda query_id, text: callback_answers.append((query_id, text))
+    item = reminder_mgr.add_reminder("Old task")
+    query = {
+        "id": "cb_task_del_1",
+        "data": f"task_del:{item['id']}",
+        "message": {"chat": {"id": 1438330510}}
+    }
+    handled = handler.handle_callback_query(query)
+    assert handled is True
+    assert len(callback_answers) == 1
+    assert "Old task" in callback_answers[0][1]
+    assert len(sent_messages) == 1
+    assert "Deleted" in sent_messages[0][1]
+    assert reminder_mgr.get_reminder(item["id"]) is None
+
+
+def test_callback_task_snooze(handler, reminder_mgr, sent_messages):
+    callback_answers = []
+    handler.answer_cb = lambda query_id, text: callback_answers.append((query_id, text))
+    item = reminder_mgr.add_reminder("Take meds", due_at=datetime.now())
+    query = {
+        "id": "cb_task_snooze_1",
+        "data": f"task_snooze:{item['id']}:15",
+        "message": {"chat": {"id": 1438330510}}
+    }
+    handled = handler.handle_callback_query(query)
+    assert handled is True
+    assert len(callback_answers) == 1
+    assert "15m" in callback_answers[0][1]
+    assert len(sent_messages) == 1
+    assert "Snoozed" in sent_messages[0][1]
+    assert "15m" in sent_messages[0][1]
+    updated = reminder_mgr.get_reminder(item["id"])
+    assert updated["due_at"] is not None
+
+
+def test_help_includes_reminders(handler, sent_messages):
+    update = {
+        "update_id": 310,
+        "message": {"chat": {"id": 1438330510}, "text": "/help"}
+    }
+    assert handler.handle_update(update) is True
+    msg = sent_messages[0][1]
+    assert "/remind" in msg
+    assert "/todo" in msg
+    assert "/tasks" in msg
+
+
+def test_tasks_menu_button_and_aliases(handler, reminder_mgr, sent_messages):
+    update = {
+        "update_id": 311,
+        "message": {"chat": {"id": 1438330510}, "text": "📝 Tasks & Reminders"}
+    }
+    assert handler.handle_update(update) is True
+    assert "no pending tasks" in sent_messages[0][1].lower() or "no tasks" in sent_messages[0][1].lower()
+
+    # /reminders alias
+    update_rem = {
+        "update_id": 312,
+        "message": {"chat": {"id": 1438330510}, "text": "/reminders"}
+    }
+    assert handler.handle_update(update_rem) is True
+
+    # /todos alias
+    update_tod = {
+        "update_id": 313,
+        "message": {"chat": {"id": 1438330510}, "text": "/todos"}
+    }
+    assert handler.handle_update(update_tod) is True
+
+
+def test_main_menu_keyboard_layout():
+    assert MAIN_MENU_KEYBOARD == {
+        "keyboard": [
+            [{"text": "📋 My Alarms"}, {"text": "📝 Tasks & Reminders"}],
+            [{"text": "📈 Quick Quotes"}, {"text": "❓ Help"}]
+        ],
+        "resize_keyboard": True,
+        "is_persistent": True
+    }
+
+
+def test_constructor_default_reminder_manager(alarm_mgr, mock_engine, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    h = TelegramCommandHandler(
+        alarm_manager=alarm_mgr,
+        engine=mock_engine,
+        send_msg_fn=lambda cid, text, **kwargs: None
+    )
+    assert hasattr(h, "reminder_manager")
+    assert isinstance(h.reminder_manager, ReminderManager)
+
+
 
 
 
