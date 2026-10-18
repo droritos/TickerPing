@@ -371,7 +371,8 @@ class TelegramCommandHandler:
     def handle_help(self, chat_id: str) -> None:
         """Send welcome message and command documentation with persistent bottom menu keyboard."""
         msg = (
-            "📈 <b>Welcome to TickerPing!</b>\n\n"
+            "🐾 <b>Welcome to TickerPing — Lainey!</b>\n"
+            "<i>Your personal assistant for stock alerts & smart reminders</i>\n\n"
             "Use the quick menu buttons below or send stock commands directly:\n\n"
             "<b>➕ Add Alarm:</b>\n"
             "• <code>AAPL 340</code> <i>(smart target)</i>\n"

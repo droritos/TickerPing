@@ -360,6 +360,76 @@ def test_cloud_runner_reminders_item_exception_resilience(tmp_path):
     runner.git_sync_changes.assert_called_once()
 
 
+def test_ensure_bot_avatar_success(tmp_path):
+    alarms_file = str(tmp_path / "alarms.json")
+    state_file = str(tmp_path / "bot_state.json")
+    runner = CloudRunner("test_token", "123", alarms_file, state_file)
+
+    runner.state_manager = MagicMock()
+    runner.state_manager.get.return_value = False
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"ok": True}
+
+    with patch("os.path.exists", return_value=True), \
+         patch("builtins.open", MagicMock()), \
+         patch("requests.post", return_value=mock_resp) as mock_post:
+        runner.ensure_bot_avatar()
+        assert mock_post.call_count == 1
+        assert "setMyProfilePhoto" in mock_post.call_args[0][0]
+        runner.state_manager.set.assert_called_with("avatar_set", True)
+
+
+def test_ensure_bot_avatar_already_set(tmp_path):
+    alarms_file = str(tmp_path / "alarms.json")
+    state_file = str(tmp_path / "bot_state.json")
+    runner = CloudRunner("test_token", "123", alarms_file, state_file)
+
+    runner.state_manager = MagicMock()
+    runner.state_manager.get.return_value = True
+
+    with patch("os.path.exists", return_value=True), \
+         patch("requests.post") as mock_post:
+        runner.ensure_bot_avatar()
+        mock_post.assert_not_called()
+
+
+def test_ensure_bot_name_success(tmp_path):
+    alarms_file = str(tmp_path / "alarms.json")
+    state_file = str(tmp_path / "bot_state.json")
+    runner = CloudRunner("test_token", "123", alarms_file, state_file)
+
+    runner.state_manager = MagicMock()
+    runner.state_manager.get.return_value = False
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"ok": True}
+
+    with patch("requests.post", return_value=mock_resp) as mock_post:
+        runner.ensure_bot_name("Lainey")
+        assert mock_post.call_count >= 1
+        name_call = mock_post.call_args_list[0]
+        assert "setMyName" in name_call[0][0]
+        assert name_call[1]["json"]["name"] == "Lainey"
+        runner.state_manager.set.assert_called_with("bot_name_set", "Lainey")
+
+
+def test_ensure_bot_name_already_set(tmp_path):
+    alarms_file = str(tmp_path / "alarms.json")
+    state_file = str(tmp_path / "bot_state.json")
+    runner = CloudRunner("test_token", "123", alarms_file, state_file)
+
+    runner.state_manager = MagicMock()
+    runner.state_manager.get.return_value = "Lainey"
+
+    with patch("requests.post") as mock_post:
+        runner.ensure_bot_name("Lainey")
+        mock_post.assert_not_called()
+
+
+
 
 
 

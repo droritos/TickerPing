@@ -255,10 +255,39 @@ class CloudRunner:
         except Exception as e:
             logger.warning(f"Could not auto-set bot profile photo: {e}")
 
+    def ensure_bot_name(self, name: str = "Lainey"):
+        """Automatically set the bot name in Telegram if not already configured."""
+        if not self.token:
+            return
+        if self.state_manager.get("bot_name_set") == name:
+            return
+        try:
+            res = requests.post(
+                f"{self.base_url}/setMyName",
+                json={"name": name},
+                timeout=15
+            )
+            if res.status_code == 200 and res.json().get("ok"):
+                logger.info(f"Bot name successfully configured in Telegram to '{name}'!")
+                self.state_manager.set("bot_name_set", name)
+                try:
+                    requests.post(
+                        f"{self.base_url}/setMyDescription",
+                        json={"description": "🐾 Lainey — Your personal stock alert & smart task reminder assistant!"},
+                        timeout=10
+                    )
+                except Exception as desc_err:
+                    logger.debug(f"setMyDescription notice: {desc_err}")
+            else:
+                logger.info(f"setMyName response: {res.text}")
+        except Exception as e:
+            logger.warning(f"Could not auto-set bot name: {e}")
+
     def run(self) -> int:
         start_time = time.time()
         logger.info(f"Starting CloudRunner (Max runtime: {self.max_runtime_seconds}s, Interval: {self.loop_interval_seconds}s)")
         self.ensure_bot_avatar()
+        self.ensure_bot_name("Lainey")
         cycles = 0
         last_stock_check = 0.0
         last_git_sync = time.time()
