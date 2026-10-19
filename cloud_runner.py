@@ -21,7 +21,7 @@ from notifier import TelegramNotifier
 from alarms_manager import AlarmManager
 from bot_state import BotStateManager
 from telegram_command_handler import TelegramCommandHandler
-from reminders_manager import ReminderManager
+from reminders_manager import ReminderManager, get_bot_timezone
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("CloudRunner")
@@ -197,6 +197,8 @@ class CloudRunner:
                 if due_at_str:
                     try:
                         dt = datetime.fromisoformat(due_at_str)
+                        if dt.tzinfo:
+                            dt = dt.astimezone(get_bot_timezone())
                         time_display = dt.strftime("%Y-%m-%d %H:%M")
                     except Exception:
                         time_display = html.escape(str(due_at_str))
@@ -284,13 +286,13 @@ class CloudRunner:
             logger.warning(f"Could not auto-set bot name: {e}")
 
     def run(self) -> int:
-        start_time = time.time()
         logger.info(f"Starting CloudRunner (Max runtime: {self.max_runtime_seconds}s, Interval: {self.loop_interval_seconds}s)")
         self.ensure_bot_avatar()
         self.ensure_bot_name("Lainey")
+        start_time = time.time()
         cycles = 0
         last_stock_check = 0.0
-        last_git_sync = time.time()
+        last_git_sync = start_time
 
         while True:
             now = time.time()

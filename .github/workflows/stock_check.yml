@@ -35,10 +35,13 @@ jobs:
 
       - name: Run 24/7 Cloud Runner
         env:
+          TZ: "Asia/Jerusalem"
+          BOT_TIMEZONE: "Asia/Jerusalem"
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DATA_FILE_PATH: alarms.json
           STATE_FILE_PATH: bot_state.json
+          REMINDERS_FILE_PATH: reminders.json
           MAX_RUNTIME_SECONDS: 18000
           LOOP_INTERVAL_SECONDS: 60
         run: |
@@ -48,5 +51,5 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add alarms.json bot_state.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: sync alarms and bot state [skip ci]" && git push)
+          git add alarms.json bot_state.json reminders.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: sync alarms, reminders, and bot state [skip ci]" && git push)

@@ -948,7 +948,7 @@ def test_tasks_list_command_empty(handler, sent_messages):
     handled = handler.handle_update(update)
     assert handled is True
     assert len(sent_messages) == 1
-    assert "no pending tasks" in sent_messages[0][1].lower() or "no tasks" in sent_messages[0][1].lower()
+    assert "no pending" in sent_messages[0][1].lower() or "no reminders" in sent_messages[0][1].lower() or "no tasks" in sent_messages[0][1].lower()
 
 
 def test_tasks_list_command_populated(handler, reminder_mgr, sent_messages, sent_markups):
@@ -1052,12 +1052,20 @@ def test_help_includes_reminders(handler, sent_messages):
 
 
 def test_tasks_menu_button_and_aliases(handler, reminder_mgr, sent_messages):
-    update = {
+    # Test new button "⏰ Reminders"
+    update_new = {
         "update_id": 311,
+        "message": {"chat": {"id": 1438330510}, "text": "⏰ Reminders"}
+    }
+    assert handler.handle_update(update_new) is True
+    assert "no pending" in sent_messages[0][1].lower() or "no reminders" in sent_messages[0][1].lower() or "no tasks" in sent_messages[0][1].lower()
+
+    # Backwards-compatible with legacy button "📝 Tasks & Reminders"
+    update_legacy = {
+        "update_id": 3110,
         "message": {"chat": {"id": 1438330510}, "text": "📝 Tasks & Reminders"}
     }
-    assert handler.handle_update(update) is True
-    assert "no pending tasks" in sent_messages[0][1].lower() or "no tasks" in sent_messages[0][1].lower()
+    assert handler.handle_update(update_legacy) is True
 
     # /reminders alias
     update_rem = {
@@ -1077,7 +1085,7 @@ def test_tasks_menu_button_and_aliases(handler, reminder_mgr, sent_messages):
 def test_main_menu_keyboard_layout():
     assert MAIN_MENU_KEYBOARD == {
         "keyboard": [
-            [{"text": "📋 My Alarms"}, {"text": "📝 Tasks & Reminders"}],
+            [{"text": "📋 My Alarms"}, {"text": "⏰ Reminders"}],
             [{"text": "📈 Quick Quotes"}, {"text": "❓ Help"}]
         ],
         "resize_keyboard": True,
@@ -1107,8 +1115,27 @@ def test_todo_command_empty(handler, reminder_mgr, sent_messages):
     handled = handler.handle_update(update)
     assert handled is True
     assert len(sent_messages) == 1
-    assert "How to add a to-do" in sent_messages[0][1]
+    assert "How to set a reminder" in sent_messages[0][1] or "How to add a to-do" in sent_messages[0][1]
     assert len(reminder_mgr.get_reminders()) == 0
+
+
+def test_natural_reminder_message_without_command(handler, reminder_mgr, sent_messages):
+    update = {
+        "update_id": 350,
+        "message": {
+            "chat": {"id": 1438330510},
+            "text": "take cake 17:45"
+        }
+    }
+    handled = handler.handle_update(update)
+    assert handled is True
+    assert len(sent_messages) == 1
+    assert "Reminder Set" in sent_messages[0][1]
+    assert "take cake" in sent_messages[0][1]
+    reminders = reminder_mgr.get_reminders()
+    assert len(reminders) == 1
+    assert reminders[0]["title"] == "take cake"
+    assert reminders[0]["due_at"] is not None
 
 
 def test_callback_task_nonexistent_ids(handler, sent_messages):

@@ -12,13 +12,13 @@ from typing import Callable, List, Dict, Any, Optional
 
 from engine import StockEngine
 from alarms_manager import AlarmManager
-from reminders_manager import ReminderManager, parse_reminder_input
+from reminders_manager import ReminderManager, parse_reminder_input, get_bot_timezone
 
 logger = logging.getLogger(__name__)
 
 MAIN_MENU_KEYBOARD: Dict[str, Any] = {
     "keyboard": [
-        [{"text": "📋 My Alarms"}, {"text": "📝 Tasks & Reminders"}],
+        [{"text": "📋 My Alarms"}, {"text": "⏰ Reminders"}],
         [{"text": "📈 Quick Quotes"}, {"text": "❓ Help"}]
     ],
     "resize_keyboard": True,
@@ -60,10 +60,13 @@ class TelegramCommandHandler:
             self.send_msg(chat_id, text)
 
     def _format_due_display(self, due_at_str: str) -> str:
-        """Helper to format an ISO due datetime string into a human-friendly display."""
+        """Helper to format an ISO due datetime string into a human-friendly display in bot timezone."""
         try:
+            tz = get_bot_timezone()
             due_dt = datetime.fromisoformat(due_at_str)
-            now = datetime.now()
+            if due_dt.tzinfo:
+                due_dt = due_dt.astimezone(tz)
+            now = datetime.now(tz)
             if due_dt.date() == now.date():
                 return f"Today at {due_dt.strftime('%H:%M')}"
             elif due_dt.date() == (now + timedelta(days=1)).date():
@@ -106,7 +109,7 @@ class TelegramCommandHandler:
         # Handle persistent menu buttons or commands
         if text in ("📋 My Alarms", "📋 my alarms") or cmd in ("/list", "/alarms", "list", "alarms"):
             self.handle_list(chat_id)
-        elif text in ("📝 Tasks & Reminders", "📝 tasks & reminders") or cmd in ("/tasks", "/reminders", "/todos", "tasks", "reminders", "todos"):
+        elif text in ("⏰ Reminders", "⏰ reminders", "📝 Tasks & Reminders", "📝 tasks & reminders") or cmd in ("/reminders", "/tasks", "/todos", "reminders", "tasks", "todos"):
             self.handle_tasks(chat_id)
         elif text in ("📈 Quick Quotes", "📈 quick quotes", "quotes", "quick quotes"):
             self.handle_quick_quotes(chat_id)
@@ -160,11 +163,15 @@ class TelegramCommandHandler:
             if is_shorthand:
                 self.handle_set(chat_id, tokens)
             else:
-                self._send(
-                    chat_id,
-                    "❓ Unknown command. Tap <b>📋 My Alarms</b> below or send <code>AAPL 340</code> to set an alert.",
-                    reply_markup=MAIN_MENU_KEYBOARD,
-                )
+                due_at, task_title = parse_reminder_input(text)
+                if due_at is not None:
+                    self.handle_remind(chat_id, text)
+                else:
+                    self._send(
+                        chat_id,
+                        "❓ Unknown command. Tap <b>📋 My Alarms</b> or <b>⏰ Reminders</b> below, or send <code>AAPL 340</code> to set an alert.",
+                        reply_markup=MAIN_MENU_KEYBOARD,
+                    )
 
         return True
 
@@ -378,26 +385,27 @@ class TelegramCommandHandler:
             "• <code>AAPL 340</code> <i>(smart target)</i>\n"
             "• <code>/set TSLA 210 BELOW</code>\n"
             "• <code>/set NVDA 140 ABOVE Breakout</code>\n\n"
-            "<b>📝 Tasks & Reminders:</b>\n"
-            "• <code>/remind 25m Check oven</code>\n"
+            "<b>⏰ Reminders:</b>\n"
+            "• <code>take cake 17:45</code>\n"
+            "• <code>/remind 25m Check oven</code> (or <code>/todo</code>)\n"
             "• <code>/remind 18:30 Call doctor</code>\n"
-            "• <code>/todo Buy groceries</code>\n"
-            "• <code>/tasks</code> — View and manage active to-dos\n\n"
+            "• <code>/reminders</code> — View and manage active reminders (or <code>/tasks</code>)\n\n"
             "<b>📊 Quotes & Market Data:</b>\n"
             "• <code>/price AAPL</code> — Live stock quote\n"
             "• <code>/news NVDA</code> — Latest top headlines\n"
             "• <code>/earnings MSFT</code> — Next earnings date & EPS estimate\n\n"
             "<b>⚡ Quick Actions:</b>\n"
-            "Tap <b>📋 My Alarms</b> or <b>📝 Tasks & Reminders</b> below."
+            "Tap <b>📋 My Alarms</b> or <b>⏰ Reminders</b> below."
         )
         self._send(chat_id, msg, reply_markup=MAIN_MENU_KEYBOARD)
 
     def handle_remind(self, chat_id: str, reminder_text: str) -> None:
-        """Parse natural reminder text and store a timed or untimed reminder."""
+        """Parse natural reminder text and store a reminder."""
         clean_text = reminder_text.strip()
         if not clean_text:
             msg = (
                 "⏰ <b>How to set a reminder:</b>\n\n"
+                "• <code>take cake 17:45</code>\n"
                 "• <code>/remind 25m Check oven</code>\n"
                 "• <code>/remind 18:30 Call doctor</code>\n"
                 "• <code>/remind tomorrow 09:00 Team meeting</code>\n"
@@ -418,77 +426,48 @@ class TelegramCommandHandler:
             due_display = self._format_due_display(item["due_at"])
             msg = (
                 f"⏰ <b>Reminder Set!</b>\n\n"
-                f"📌 <b>Task:</b> {escaped_title}\n"
+                f"📌 <b>Reminder:</b> {escaped_title}\n"
                 f"⏳ <b>Due:</b> {due_display}\n"
                 f"🆔 <b>ID:</b> <code>{item['id']}</code>"
             )
         else:
             msg = (
-                f"📝 <b>Task Added!</b>\n\n"
-                f"📌 <b>Task:</b> {escaped_title}\n"
+                f"⏰ <b>Reminder Saved!</b>\n\n"
+                f"📌 <b>Reminder:</b> {escaped_title}\n"
                 f"🆔 <b>ID:</b> <code>{item['id']}</code>"
             )
         self._send(chat_id, msg, reply_markup=MAIN_MENU_KEYBOARD)
 
     def handle_todo(self, chat_id: str, todo_text: str) -> None:
-        """Parse to-do or task text and store an untimed or timed to-do."""
-        clean_text = todo_text.strip()
-        if not clean_text:
-            msg = (
-                "📝 <b>How to add a to-do / task:</b>\n\n"
-                "• <code>/todo Buy almond milk</code>\n"
-                "• <code>/todo tomorrow 09:00 Team meeting</code>\n"
-                "• <code>/task Finish quarterly report</code>"
-            )
-            self._send(chat_id, msg, reply_markup=MAIN_MENU_KEYBOARD)
-            return
-
-        due_at, task_title = parse_reminder_input(clean_text)
-        if not task_title:
-            task_title = "To-Do"
-
-        item = self.reminder_manager.add_reminder(title=task_title, due_at=due_at)
-        escaped_title = html.escape(item["title"])
-
-        if item.get("due_at"):
-            due_display = self._format_due_display(item["due_at"])
-            msg = (
-                f"⏰ <b>Reminder Set!</b>\n\n"
-                f"📌 <b>Task:</b> {escaped_title}\n"
-                f"⏳ <b>Due:</b> {due_display}\n"
-                f"🆔 <b>ID:</b> <code>{item['id']}</code>"
-            )
-        else:
-            msg = (
-                f"📝 <b>To-Do Added!</b>\n\n"
-                f"📌 <b>Task:</b> {escaped_title}\n"
-                f"🆔 <b>ID:</b> <code>{item['id']}</code>"
-            )
-        self._send(chat_id, msg, reply_markup=MAIN_MENU_KEYBOARD)
+        """Alias for handle_remind to unify tasks and reminders."""
+        self.handle_remind(chat_id, todo_text)
 
     def handle_tasks(self, chat_id: str) -> None:
-        """Display all active tasks and reminders with interactive Done and Delete inline buttons."""
+        """Display all active reminders with interactive Done and Delete inline buttons."""
         items = self.reminder_manager.get_reminders(include_completed=False)
         if not items:
             msg = (
-                "📝 <b>Your Tasks & Reminders:</b>\n\n"
-                "📭 You have no pending tasks or reminders!\n"
-                "Send <code>/remind 25m Check oven</code> or <code>/todo Buy milk</code> to add one."
+                "⏰ <b>Your Reminders:</b>\n\n"
+                "📭 You have no pending reminders!\n"
+                "Send <code>take cake 17:45</code> or <code>/remind 25m Check oven</code> to add one."
             )
             self._send(chat_id, msg, reply_markup=MAIN_MENU_KEYBOARD)
             return
 
-        now = datetime.now()
-        lines = [f"📝 <b>Your Tasks & Reminders ({len(items)}):</b>\n"]
+        tz = get_bot_timezone()
+        now = datetime.now(tz)
+        lines = [f"⏰ <b>Your Reminders ({len(items)}):</b>\n"]
         inline_keyboard = []
 
         for i, item in enumerate(items, 1):
-            escaped_title = html.escape(item.get("title", "Task"))
+            escaped_title = html.escape(item.get("title", "Reminder"))
             due_at_str = item.get("due_at")
             time_badge = ""
             if due_at_str:
                 try:
                     due_dt = datetime.fromisoformat(due_at_str)
+                    if due_dt.tzinfo:
+                        due_dt = due_dt.astimezone(tz)
                     if due_dt.date() == now.date():
                         time_badge = f"[{due_dt.strftime('%H:%M')}] "
                     else:

@@ -13,52 +13,28 @@ import threading
 from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
+from zoneinfo import ZoneInfo
+
 logger = logging.getLogger(__name__)
 
 
-def parse_reminder_input(raw_text: str, now: Optional[datetime] = None) -> Tuple[Optional[datetime], str]:
-    """
-    Parses natural reminder input into (due_at, task_title).
-    If no time is detected, returns (None, raw_text) indicating an untimed to-do item.
-    """
-    if now is None:
-        now = datetime.now()
+def get_bot_timezone() -> ZoneInfo:
+    """Returns the configured timezone for the bot, defaulting to Asia/Jerusalem."""
+    tz_name = os.getenv("BOT_TIMEZONE", os.getenv("TZ", "Asia/Jerusalem"))
+    try:
+        return ZoneInfo(tz_name)
+    except Exception:
+        return ZoneInfo("Asia/Jerusalem")
 
-    text = raw_text.strip()
-    if not text:
-        return None, ""
 
-    # 1. Relative duration: "in 25m", "25m", "10 min", "2h", "1.5h", "in 1 hour", "1 minute"
-    rel_match = re.match(
-        r"^(?:in\s+)?(\d+(?:\.\d+)?)\s*(m|min|mins|minutes?|h|hr|hrs|hours?)\b\s*(.*)$",
-        text,
-        re.IGNORECASE
-    )
-    if rel_match:
-        try:
-            val = float(rel_match.group(1))
-            unit = rel_match.group(2).lower()
-            remainder = rel_match.group(3).strip()
-            if unit.startswith("m"):
-                due_at = now + timedelta(minutes=val)
-            else:
-                due_at = now + timedelta(hours=val)
-            return due_at, remainder
-        except (ValueError, OverflowError):
-            pass
-
-    # 2. "tomorrow" with optional time: "tomorrow 09:00 Buy milk", "tomorrow Buy milk", "tomorrow 8:30pm dinner"
-    tom_match = re.match(
-        r"^tomorrow(?:\s+at)?(?:\s+(\d{1,2}):(\d{2})\s*(am|pm)?)?\b\s*(.*)$",
-        text,
-        re.IGNORECASE
-    )
-    if tom_match:
-        hour_str = tom_match.group(1)
-        min_str = tom_match.group(2)
-        ampm_str = tom_match.group(3)
-        remainder = tom_match.group(4).strip()
-        hour = int(hour_str) if hour_str is not None else 9
+def _parse_time_component(
+    hour_str: str,
+    min_str: Optional[str],
+    ampm_str: Optional[str],
+    now: datetime
+) -> Optional[datetime]:
+    try:
+        hour = int(hour_str)
         minute = int(min_str) if min_str is not None else 0
         if ampm_str:
             ampm = ampm_str.lower()
@@ -66,120 +42,252 @@ def parse_reminder_input(raw_text: str, now: Optional[datetime] = None) -> Tuple
                 hour += 12
             elif ampm == "am" and hour == 12:
                 hour = 0
-        try:
-            tomorrow = now + timedelta(days=1)
-            due_at = datetime(tomorrow.year, tomorrow.month, tomorrow.day, hour, minute, 0)
-            return due_at, remainder
-        except (ValueError, OverflowError):
-            pass
+        if hour >= 24 or minute >= 60:
+            return None
+        tz = now.tzinfo
+        if tz:
+            due_at = now.replace(hour=hour, minute=minute, second=0, microsecond=0, tzinfo=tz)
+        else:
+            due_at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if due_at <= now:
+            due_at += timedelta(days=1)
+        return due_at
+    except (ValueError, OverflowError):
+        return None
 
-    # 3. Calendar date: "18/11 19:30 Wedding", "18/11 Wedding", "2026-11-18 19:30", etc.
-    date_match = re.match(
-        r"^(\d{1,4})([/\-\.])(\d{1,2})(?:[/\-\.](\d{2,4}))?(?:\s+(?:at\s+)?(\d{1,2}):(\d{2})\s*(am|pm)?)?\b\s*(.*)$",
+
+def _parse_rel_component(val_str: str, unit_str: str, now: datetime) -> Optional[datetime]:
+    try:
+        val = float(val_str)
+        unit = unit_str.lower()
+        if unit.startswith("m"):
+            return now + timedelta(minutes=val)
+        else:
+            return now + timedelta(hours=val)
+    except (ValueError, OverflowError):
+        return None
+
+
+def parse_reminder_input(raw_text: str, now: Optional[datetime] = None) -> Tuple[Optional[datetime], str]:
+    """
+    Parses natural reminder input into (due_at, task_title).
+    Supports time/duration at the start or end of the text:
+      - Relative: "25m Check oven", "Check oven in 25m", "Check oven 25m", "2h Laundry", "Laundry 2h"
+      - Time of day: "17:45 cake", "take cake 17:45", "take cake at 17:45", "17 take cake", "take cake 17", "take cake at 17", "8:30pm dinner"
+      - Tomorrow: "tomorrow 09:00 Meeting", "Meeting tomorrow 09:00", "Meeting tomorrow at 9:00", "Buy milk tomorrow"
+      - Calendar date: "18/11 19:30 Wedding", "Wedding 18/11 19:30", "Wedding on 18/11 at 19:30", "Wedding 18/11"
+    If no time is detected, returns (None, raw_text).
+    """
+    tz = get_bot_timezone()
+    return_naive = (now is not None and now.tzinfo is None)
+    if now is None:
+        now = datetime.now(tz)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=tz)
+
+    text = raw_text.strip()
+    if not text:
+        return None, ""
+
+    def _finish(due: Optional[datetime], rem: str) -> Tuple[Optional[datetime], str]:
+        if due is not None and return_naive:
+            due = due.replace(tzinfo=None)
+        return due, rem
+
+    # 1. Relative duration at start: "in 25m Check oven", "25m Check oven", "2h Laundry"
+    rel_pre = re.match(
+        r"^(?:in\s+)?(\d+(?:\.\d+)?)\s*(m|min|mins|minutes?|h|hr|hrs|hours?)\b\s*(.*)$",
         text,
         re.IGNORECASE
     )
-    if date_match:
-        part1 = date_match.group(1)
-        sep = date_match.group(2)
-        part2 = date_match.group(3)
-        part3 = date_match.group(4)
-        hour_str = date_match.group(5)
-        min_str = date_match.group(6)
-        ampm_str = date_match.group(7)
-        remainder = date_match.group(8).strip()
+    if rel_pre and rel_pre.group(3).strip():
+        due = _parse_rel_component(rel_pre.group(1), rel_pre.group(2), now)
+        if due:
+            return _finish(due, rel_pre.group(3).strip())
 
+    # 2. Relative duration at end: "Check oven in 25m", "Check oven 25m", "Laundry 2h", "Laundry in 2h"
+    rel_post = re.match(
+        r"^(.*?)\s+(?:in\s+)?(\d+(?:\.\d+)?)\s*(m|min|mins|minutes?|h|hr|hrs|hours?)$",
+        text,
+        re.IGNORECASE
+    )
+    if rel_post and rel_post.group(1).strip():
+        due = _parse_rel_component(rel_post.group(2), rel_post.group(3), now)
+        if due:
+            return _finish(due, rel_post.group(1).strip())
+
+    # 3. "tomorrow" at start: "tomorrow 09:00 Meeting", "tomorrow Buy milk"
+    tom_pre = re.match(
+        r"^tomorrow(?:\s+at)?(?:\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?)?\b\s*(.*)$",
+        text,
+        re.IGNORECASE
+    )
+    if tom_pre:
+        h_str, mn_str, ampm, rem = tom_pre.group(1), tom_pre.group(2), tom_pre.group(3), tom_pre.group(4).strip()
+        try:
+            hour = int(h_str) if h_str else 9
+            minute = int(mn_str) if mn_str else 0
+            if hour >= 24 or minute >= 60:
+                return None, text
+            if ampm:
+                if ampm.lower() == "pm" and hour < 12:
+                    hour += 12
+                elif ampm.lower() == "am" and hour == 12:
+                    hour = 0
+            tom = now + timedelta(days=1)
+            due = tom.replace(hour=hour, minute=minute, second=0, microsecond=0, tzinfo=now.tzinfo)
+            return _finish(due, rem)
+        except (ValueError, OverflowError):
+            return None, text
+
+    # 4. "tomorrow" at end: "Meeting tomorrow 09:00", "Meeting tomorrow at 9:00", "Buy milk tomorrow"
+    tom_post = re.match(
+        r"^(.*?)\s+tomorrow(?:\s+at)?(?:\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?)?$",
+        text,
+        re.IGNORECASE
+    )
+    if tom_post and tom_post.group(1).strip():
+        rem, h_str, mn_str, ampm = tom_post.group(1).strip(), tom_post.group(2), tom_post.group(3), tom_post.group(4)
+        try:
+            hour = int(h_str) if h_str else 9
+            minute = int(mn_str) if mn_str else 0
+            if hour >= 24 or minute >= 60:
+                return None, text
+            if ampm:
+                if ampm.lower() == "pm" and hour < 12:
+                    hour += 12
+                elif ampm.lower() == "am" and hour == 12:
+                    hour = 0
+            tom = now + timedelta(days=1)
+            due = tom.replace(hour=hour, minute=minute, second=0, microsecond=0, tzinfo=now.tzinfo)
+            return _finish(due, rem)
+        except (ValueError, OverflowError):
+            return None, text
+
+    # 5. Calendar date at start: "18/11 19:30 Wedding", "18/11 Wedding"
+    date_pre = re.match(
+        r"^(\d{1,4})([/\-\.])(\d{1,2})(?:[/\-\.](\d{2,4}))?(?:\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?)?\b\s*(.*)$",
+        text,
+        re.IGNORECASE
+    )
+    if date_pre:
+        part1, sep, part2, part3 = date_pre.group(1), date_pre.group(2), date_pre.group(3), date_pre.group(4)
+        h_str, mn_str, ampm, rem = date_pre.group(5), date_pre.group(6), date_pre.group(7), date_pre.group(8).strip()
         is_valid_date = True
-        # Prevent false positives: decimals (e.g. 3.5 star review) and ranges (e.g. 5-6 apples)
-        if sep in (".", "-"):
-            if not part3 and not hour_str:
-                # Require explicit year or explicit time for dot and dash separators
-                is_valid_date = False
-        elif sep == "/":
-            if not part3 and not hour_str:
-                # Common fractions without year or time (e.g. 1/2 cup sugar)
-                common_fractions = {
-                    (1, 2), (1, 3), (2, 3), (1, 4), (3, 4),
-                    (1, 5), (2, 5), (3, 5), (4, 5),
-                    (1, 6), (5, 6),
-                    (1, 8), (3, 8), (5, 8), (7, 8),
-                    (1, 10), (3, 10), (7, 10), (9, 10)
-                }
-                try:
-                    if (int(part1), int(part2)) in common_fractions:
-                        is_valid_date = False
-                except ValueError:
-                    pass
-
-                first_word = remainder.split()[0].lower() if remainder.split() else ""
-                measurement_units = {
-                    "cup", "cups", "tsp", "tbsp", "teaspoon", "teaspoons",
-                    "tablespoon", "tablespoons", "oz", "ounce", "ounces",
-                    "lb", "lbs", "pound", "pounds", "g", "gram", "grams",
-                    "kg", "kilo", "kilos", "slice", "slices", "can", "cans",
-                    "bottle", "bottles", "pinch", "pinches", "quart", "quarts",
-                    "pint", "pints", "gallon", "gallons"
-                }
-                if first_word in measurement_units:
+        if sep in (".", "-") and not part3 and not h_str:
+            is_valid_date = False
+        elif sep == "/" and not part3 and not h_str:
+            common_fractions = {(1, 2), (1, 3), (2, 3), (1, 4), (3, 4)}
+            try:
+                if (int(part1), int(part2)) in common_fractions:
                     is_valid_date = False
-
+            except ValueError:
+                pass
         if is_valid_date:
+            try:
+                if len(part1) == 4:
+                    year, month, day = int(part1), int(part2), int(part3) if part3 else 1
+                    has_explicit_year = True
+                else:
+                    day, month = int(part1), int(part2)
+                    has_explicit_year = bool(part3)
+                    year = int(part3) if part3 else now.year
+                    if year < 100:
+                        year += 2000
+                hour = int(h_str) if h_str is not None else 9
+                minute = int(mn_str) if mn_str is not None else 0
+                if hour >= 24 or minute >= 60:
+                    return None, text
+                if ampm:
+                    if ampm.lower() == "pm" and hour < 12:
+                        hour += 12
+                    elif ampm.lower() == "am" and hour == 12:
+                        hour = 0
+                due_at = datetime(year, month, day, hour, minute, 0, tzinfo=now.tzinfo)
+                if not has_explicit_year and due_at < now:
+                    due_at = datetime(year + 1, month, day, hour, minute, 0, tzinfo=now.tzinfo)
+                return _finish(due_at, rem)
+            except (ValueError, OverflowError):
+                pass
+
+    # 6. Calendar date at end: "Wedding 18/11 19:30", "Wedding on 18/11 at 19:30", "Wedding 18/11"
+    date_post = re.match(
+        r"^(.*?)\s+(?:on\s+)?(\d{1,4})([/\-\.])(\d{1,2})(?:[/\-\.](\d{2,4}))?(?:\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?)?$",
+        text,
+        re.IGNORECASE
+    )
+    if date_post and date_post.group(1).strip():
+        rem = date_post.group(1).strip()
+        part1, sep, part2, part3 = date_post.group(2), date_post.group(3), date_post.group(4), date_post.group(5)
+        h_str, mn_str, ampm = date_post.group(6), date_post.group(7), date_post.group(8)
+        try:
             if len(part1) == 4:
-                year = int(part1)
-                month = int(part2)
-                day = int(part3) if part3 else 1
+                year, month, day = int(part1), int(part2), int(part3) if part3 else 1
                 has_explicit_year = True
             else:
-                day = int(part1)
-                month = int(part2)
+                day, month = int(part1), int(part2)
                 has_explicit_year = bool(part3)
                 year = int(part3) if part3 else now.year
                 if year < 100:
                     year += 2000
-
-            hour = int(hour_str) if hour_str is not None else 9
-            minute = int(min_str) if min_str is not None else 0
-            if ampm_str:
-                ampm = ampm_str.lower()
-                if ampm == "pm" and hour < 12:
+            hour = int(h_str) if h_str is not None else 9
+            minute = int(mn_str) if mn_str is not None else 0
+            if hour >= 24 or minute >= 60:
+                return None, text
+            if ampm:
+                if ampm.lower() == "pm" and hour < 12:
                     hour += 12
-                elif ampm == "am" and hour == 12:
+                elif ampm.lower() == "am" and hour == 12:
                     hour = 0
-
-            try:
-                due_at = datetime(year, month, day, hour, minute, 0)
-                if not has_explicit_year and due_at < now:
-                    due_at = datetime(year + 1, month, day, hour, minute, 0)
-                return due_at, remainder
-            except (ValueError, OverflowError):
-                pass
-
-    # 4. Time of day: "18:30 Call doctor", "at 18:30 Call doctor", "8:30pm dinner"
-    time_match = re.match(
-        r"^(?:at\s+)?(\d{1,2}):(\d{2})\s*(am|pm)?\b\s*(.*)$",
-        text,
-        re.IGNORECASE
-    )
-    if time_match:
-        hour = int(time_match.group(1))
-        minute = int(time_match.group(2))
-        ampm_str = time_match.group(3)
-        remainder = time_match.group(4).strip()
-        if ampm_str:
-            ampm = ampm_str.lower()
-            if ampm == "pm" and hour < 12:
-                hour += 12
-            elif ampm == "am" and hour == 12:
-                hour = 0
-        try:
-            due_at = datetime(now.year, now.month, now.day, hour, minute, 0)
-            if due_at <= now:
-                due_at += timedelta(days=1)
-            return due_at, remainder
+            due_at = datetime(year, month, day, hour, minute, 0, tzinfo=now.tzinfo)
+            if not has_explicit_year and due_at < now:
+                due_at = datetime(year + 1, month, day, hour, minute, 0, tzinfo=now.tzinfo)
+            return _finish(due_at, rem)
         except (ValueError, OverflowError):
             pass
 
-    # Untimed to-do item
+    # 7. Time of day at start: "17:45 cake", "at 17:45 cake", "17 cake", "at 17 cake", "8:30pm dinner"
+    time_pre = re.match(
+        r"^(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b\s*(.*)$",
+        text,
+        re.IGNORECASE
+    )
+    if time_pre:
+        h_str, mn_str, ampm, rem = time_pre.group(1), time_pre.group(2), time_pre.group(3), time_pre.group(4).strip()
+        if not rem.startswith((".", ",", "-", "/")):
+            is_valid_time = False
+            if mn_str is not None or ampm is not None:
+                is_valid_time = True
+            elif text.lower().startswith("at "):
+                is_valid_time = True
+            elif rem and int(h_str) in range(12, 24):
+                is_valid_time = True
+            if is_valid_time:
+                due = _parse_time_component(h_str, mn_str, ampm, now)
+                if due and rem:
+                    return _finish(due, rem)
+
+    # 8. Time of day at end: "take cake 17:45", "take cake at 17:45", "take cake 17", "take cake at 17", "dinner 8:30pm"
+    time_post = re.match(
+        r"^(.*?)\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$",
+        text,
+        re.IGNORECASE
+    )
+    if time_post:
+        rem, h_str, mn_str, ampm = time_post.group(1).strip(), time_post.group(2), time_post.group(3), time_post.group(4)
+        is_valid_time = False
+        if mn_str is not None or ampm is not None:
+            is_valid_time = True
+        elif " at " in text.lower():
+            is_valid_time = True
+        elif rem and int(h_str) in range(0, 24):
+            is_valid_time = True
+        if is_valid_time:
+            due = _parse_time_component(h_str, mn_str, ampm, now)
+            if due and rem:
+                return _finish(due, rem)
+
+    # Untimed reminder item
     return None, text
 
 
@@ -278,8 +386,12 @@ class ReminderManager:
             return [i for i in items if not i.get("completed", False)]
 
     def get_due_reminders(self, now: Optional[datetime] = None) -> List[Dict[str, Any]]:
+        tz = get_bot_timezone()
         if now is None:
-            now = datetime.now()
+            now = datetime.now(tz)
+        elif now.tzinfo is None:
+            now = now.replace(tzinfo=tz)
+
         with self._lock:
             items = self.get_reminders(include_completed=False)
             due = []
@@ -289,6 +401,10 @@ class ReminderManager:
                     continue
                 try:
                     due_dt = datetime.fromisoformat(due_at_str)
+                    if due_dt.tzinfo is None:
+                        due_dt = due_dt.replace(tzinfo=tz)
+                    else:
+                        due_dt = due_dt.astimezone(tz)
                     if due_dt <= now:
                         due.append(i)
                 except Exception:
@@ -342,8 +458,12 @@ class ReminderManager:
         minutes: int = 10,
         now: Optional[datetime] = None
     ) -> Optional[Dict[str, Any]]:
+        tz = get_bot_timezone()
+        is_naive = (now is not None and now.tzinfo is None)
         if now is None:
-            now = datetime.now()
+            now = datetime.now(tz)
+        elif now.tzinfo is None:
+            now = now.replace(tzinfo=tz)
         clean_id = str(reminder_id).strip().lower()
         with self._lock:
             items = self._read_file()
@@ -351,6 +471,8 @@ class ReminderManager:
             for i in items:
                 if str(i.get("id", "")).strip().lower() == clean_id:
                     new_due = now + timedelta(minutes=minutes)
+                    if is_naive:
+                        new_due = new_due.replace(tzinfo=None)
                     i["due_at"] = new_due.isoformat()
                     i["triggered"] = False
                     i["completed"] = False
@@ -360,3 +482,4 @@ class ReminderManager:
             if target:
                 self._write_file(items)
             return target
+

@@ -62,7 +62,10 @@ def test_cloud_runner_run_exits_within_budget(tmp_path):
         loop_interval_seconds=1
     )
 
-    with patch.object(runner, "poll_telegram_updates"), patch.object(runner, "evaluate_active_alarms"):
+    with patch.object(runner, "poll_telegram_updates"), \
+         patch.object(runner, "evaluate_active_alarms"), \
+         patch.object(runner, "ensure_bot_avatar"), \
+         patch.object(runner, "ensure_bot_name"):
         cycles = runner.run()
         assert cycles >= 1
 
@@ -202,6 +205,8 @@ def test_cloud_runner_run_calls_evaluate_due_reminders(tmp_path):
 
     with patch.object(runner, "poll_telegram_updates"), \
          patch.object(runner, "evaluate_active_alarms"), \
+         patch.object(runner, "ensure_bot_avatar"), \
+         patch.object(runner, "ensure_bot_name"), \
          patch.object(runner, "evaluate_due_reminders") as mock_eval:
         runner.run()
         assert mock_eval.call_count >= 1

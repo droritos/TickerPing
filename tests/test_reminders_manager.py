@@ -272,3 +272,95 @@ def test_reminder_manager_data_loss_prevention(tmp_path):
 
     with open(storage, "r", encoding="utf-8") as f:
         assert f.read() == "{this is not valid json"
+
+
+def test_parse_reminder_input_time_at_end():
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("Asia/Jerusalem")
+    base_time = datetime(2026, 10, 19, 10, 0, 0, tzinfo=tz)
+
+    due, text = parse_reminder_input("take cake 17:45", now=base_time)
+    assert due == datetime(2026, 10, 19, 17, 45, 0, tzinfo=tz)
+    assert text == "take cake"
+
+    due2, text2 = parse_reminder_input("take cake at 17:45", now=base_time)
+    assert due2 == datetime(2026, 10, 19, 17, 45, 0, tzinfo=tz)
+    assert text2 == "take cake"
+
+    due3, text3 = parse_reminder_input("take cake 17:00", now=base_time)
+    assert due3 == datetime(2026, 10, 19, 17, 0, 0, tzinfo=tz)
+    assert text3 == "take cake"
+
+    due4, text4 = parse_reminder_input("take cake 17", now=base_time)
+    assert due4 == datetime(2026, 10, 19, 17, 0, 0, tzinfo=tz)
+    assert text4 == "take cake"
+
+    due5, text5 = parse_reminder_input("take cake at 17", now=base_time)
+    assert due5 == datetime(2026, 10, 19, 17, 0, 0, tzinfo=tz)
+    assert text5 == "take cake"
+
+
+def test_parse_reminder_input_relative_at_end():
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("Asia/Jerusalem")
+    base_time = datetime(2026, 10, 19, 10, 0, 0, tzinfo=tz)
+
+    due, text = parse_reminder_input("Check oven in 25m", now=base_time)
+    assert due == datetime(2026, 10, 19, 10, 25, 0, tzinfo=tz)
+    assert text == "Check oven"
+
+    due2, text2 = parse_reminder_input("Check oven 25m", now=base_time)
+    assert due2 == datetime(2026, 10, 19, 10, 25, 0, tzinfo=tz)
+    assert text2 == "Check oven"
+
+    due3, text3 = parse_reminder_input("Laundry in 2h", now=base_time)
+    assert due3 == datetime(2026, 10, 19, 12, 0, 0, tzinfo=tz)
+    assert text3 == "Laundry"
+
+
+def test_parse_reminder_input_tomorrow_at_end():
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("Asia/Jerusalem")
+    base_time = datetime(2026, 10, 19, 10, 0, 0, tzinfo=tz)
+
+    due, text = parse_reminder_input("Meeting tomorrow 09:00", now=base_time)
+    assert due == datetime(2026, 10, 20, 9, 0, 0, tzinfo=tz)
+    assert text == "Meeting"
+
+    due2, text2 = parse_reminder_input("Meeting tomorrow at 9:00", now=base_time)
+    assert due2 == datetime(2026, 10, 20, 9, 0, 0, tzinfo=tz)
+    assert text2 == "Meeting"
+
+    due3, text3 = parse_reminder_input("Buy milk tomorrow", now=base_time)
+    assert due3 == datetime(2026, 10, 20, 9, 0, 0, tzinfo=tz)
+    assert text3 == "Buy milk"
+
+
+def test_parse_reminder_input_calendar_at_end():
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("Asia/Jerusalem")
+    base_time = datetime(2026, 10, 19, 10, 0, 0, tzinfo=tz)
+
+    due, text = parse_reminder_input("Wedding 18/11 19:30", now=base_time)
+    # November in Israel is UTC+2 (standard winter time)
+    assert due.day == 18 and due.month == 11 and due.hour == 19 and due.minute == 30
+    assert text == "Wedding"
+
+    due2, text2 = parse_reminder_input("Wedding on 18/11 at 19:30", now=base_time)
+    assert due2.day == 18 and due2.month == 11 and due2.hour == 19 and due2.minute == 30
+    assert text2 == "Wedding"
+
+    due3, text3 = parse_reminder_input("Wedding 18/11", now=base_time)
+    assert due3.day == 18 and due3.month == 11 and due3.hour == 9 and due3.minute == 0
+    assert text3 == "Wedding"
+
+
+def test_get_bot_timezone(monkeypatch):
+    from reminders_manager import get_bot_timezone
+    monkeypatch.delenv("BOT_TIMEZONE", raising=False)
+    monkeypatch.delenv("TZ", raising=False)
+    assert str(get_bot_timezone()) == "Asia/Jerusalem"
+
+    monkeypatch.setenv("BOT_TIMEZONE", "America/New_York")
+    assert str(get_bot_timezone()) == "America/New_York"
+
