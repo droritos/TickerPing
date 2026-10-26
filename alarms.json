@@ -94,5 +94,17 @@
     "trigger_price": null,
     "created_at": "2026-10-26T18:18:19.508416",
     "last_triggered_at": null
+  },
+  {
+    "id": "d760ecdf",
+    "ticker": "ADBE",
+    "target_price": 273.0,
+    "direction": "ABOVE",
+    "note": "",
+    "active": true,
+    "triggered": false,
+    "trigger_price": null,
+    "created_at": "2026-10-26T18:31:47.831215",
+    "last_triggered_at": null
   }
 ]
