@@ -82,5 +82,17 @@
     "trigger_price": null,
     "created_at": "2026-10-19T18:28:52.584461",
     "last_triggered_at": null
+  },
+  {
+    "id": "ea75a219",
+    "ticker": "NVDA",
+    "target_price": 220.0,
+    "direction": "ABOVE",
+    "note": "",
+    "active": true,
+    "triggered": false,
+    "trigger_price": null,
+    "created_at": "2026-10-26T18:18:19.508416",
+    "last_triggered_at": null
   }
 ]
