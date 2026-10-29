@@ -120,18 +120,6 @@
     "last_triggered_at": null
   },
   {
-    "id": "5ff79123",
-    "ticker": "GOOGL",
-    "target_price": 270.0,
-    "direction": "BELOW",
-    "note": "",
-    "active": true,
-    "triggered": false,
-    "trigger_price": null,
-    "created_at": "2026-10-29T19:18:35.481289",
-    "last_triggered_at": null
-  },
-  {
     "id": "270fe743",
     "ticker": "GOOGL",
     "target_price": 272.0,
