@@ -114,9 +114,9 @@
     "direction": "BELOW",
     "note": "",
     "active": true,
-    "triggered": false,
-    "trigger_price": null,
+    "triggered": true,
+    "trigger_price": 512.34,
     "created_at": "2026-10-29T08:37:17.263997",
-    "last_triggered_at": null
+    "last_triggered_at": "2026-10-29T15:30:16.207128"
   }
 ]
