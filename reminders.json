@@ -48,10 +48,10 @@
     "title": "To dryer",
     "due_at": "2026-10-30T12:24:02.628294+02:00",
     "completed": false,
-    "triggered": false,
+    "triggered": true,
     "created_at": "2026-10-30T10:54:02.628388",
     "completed_at": null,
-    "last_triggered_at": null,
+    "last_triggered_at": "2026-10-30T12:24:09.346258",
     "note": ""
   }
 ]
