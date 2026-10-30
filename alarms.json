@@ -66,10 +66,10 @@
     "direction": "BELOW",
     "note": "",
     "active": true,
-    "triggered": false,
-    "trigger_price": null,
+    "triggered": true,
+    "trigger_price": 694.9,
     "created_at": "2026-10-17T09:59:25.087960",
-    "last_triggered_at": null
+    "last_triggered_at": "2026-10-30T17:20:44.726898"
   },
   {
     "id": "e45b7819",
