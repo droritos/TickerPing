@@ -86,16 +86,5 @@
     "completed_at": null,
     "last_triggered_at": null,
     "note": ""
-  },
-  {
-    "id": "7819f112",
-    "title": "find swish",
-    "due_at": "2026-10-31T21:00:00+02:00",
-    "completed": false,
-    "triggered": false,
-    "created_at": "2026-10-31T17:25:54.472672",
-    "completed_at": null,
-    "last_triggered_at": null,
-    "note": ""
   }
 ]
