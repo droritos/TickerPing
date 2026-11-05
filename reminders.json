@@ -91,10 +91,10 @@
     "id": "cbbe377a",
     "title": "Buy Eggs & Koteg",
     "due_at": "2026-11-05T20:15:00+02:00",
-    "completed": false,
+    "completed": true,
     "triggered": true,
     "created_at": "2026-11-05T18:37:35.634650",
-    "completed_at": null,
+    "completed_at": "2026-11-06T00:40:50.726029",
     "last_triggered_at": "2026-11-05T22:25:04.650492",
     "note": ""
   }
