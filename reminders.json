@@ -92,10 +92,10 @@
     "title": "Buy Eggs & Koteg",
     "due_at": "2026-11-05T20:15:00+02:00",
     "completed": false,
-    "triggered": false,
+    "triggered": true,
     "created_at": "2026-11-05T18:37:35.634650",
     "completed_at": null,
-    "last_triggered_at": null,
+    "last_triggered_at": "2026-11-05T22:25:04.650492",
     "note": ""
   }
 ]
