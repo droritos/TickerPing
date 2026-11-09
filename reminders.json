@@ -97,5 +97,16 @@
     "completed_at": "2026-11-06T00:40:50.726029",
     "last_triggered_at": "2026-11-05T22:25:04.650492",
     "note": ""
+  },
+  {
+    "id": "b2ed01cd",
+    "title": "final answer do we meeting for a 🎥 movie",
+    "due_at": "2026-11-10T12:00:00+02:00",
+    "completed": false,
+    "triggered": false,
+    "created_at": "2026-11-10T00:25:46.659819",
+    "completed_at": null,
+    "last_triggered_at": null,
+    "note": ""
   }
 ]
