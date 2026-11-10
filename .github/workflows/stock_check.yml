@@ -11,7 +11,7 @@ on:
 
 concurrency:
   group: tickerping-bot
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -42,14 +42,31 @@ jobs:
           DATA_FILE_PATH: alarms.json
           STATE_FILE_PATH: bot_state.json
           REMINDERS_FILE_PATH: reminders.json
-          MAX_RUNTIME_SECONDS: 18000
+          MAX_RUNTIME_SECONDS: 17100
           LOOP_INTERVAL_SECONDS: 60
         run: |
           python cloud_runner.py
 
       - name: Commit & Push Alarm Trigger Status & Bot State
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add alarms.json bot_state.json reminders.json
           git diff --quiet && git diff --staged --quiet || (git commit -m "chore: sync alarms, reminders, and bot state [skip ci]" && git push)
+
+      - name: Dispatch Next Runner Shift (24/7 Continuous Relay)
+        if: always()
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -n "$GH_PAT" ]; then
+            echo "🚀 Triggering next 24/7 runner shift..."
+            curl -f -s -X POST \
+              -H "Authorization: Bearer $GH_PAT" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/${{ github.repository }}/actions/workflows/stock_check.yml/dispatches \
+              -d '{"ref":"main"}' && echo "✅ Successfully queued next runner shift!"
+          else
+            echo "ℹ️ GH_PAT secret not configured yet. Falling back to cron schedule."
+          fi
