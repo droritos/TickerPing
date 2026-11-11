@@ -108,5 +108,16 @@
     "completed_at": null,
     "last_triggered_at": "2026-11-10T13:17:19.071122",
     "note": ""
+  },
+  {
+    "id": "4b727d67",
+    "title": "turn on boiler",
+    "due_at": "2026-11-11T20:30:00+02:00",
+    "completed": false,
+    "triggered": false,
+    "created_at": "2026-11-11T18:39:04.330675",
+    "completed_at": null,
+    "last_triggered_at": null,
+    "note": ""
   }
 ]
