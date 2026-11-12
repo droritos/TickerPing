@@ -156,15 +156,15 @@
     "last_triggered_at": null
   },
   {
-    "id": "02747e9e",
+    "id": "32ae0a8c",
     "ticker": "GOOGL",
-    "target_price": 296.0,
-    "direction": "ABOVE",
-    "note": "",
+    "target_price": 281.48,
+    "direction": "BELOW",
+    "note": "Re-armed alert",
     "active": true,
-    "triggered": true,
-    "trigger_price": 296.29,
-    "created_at": "2026-11-12T17:53:52.068148",
-    "last_triggered_at": "2026-11-12T17:54:41.897453"
+    "triggered": false,
+    "trigger_price": null,
+    "created_at": "2026-11-12T18:00:32.569920",
+    "last_triggered_at": null
   }
 ]
