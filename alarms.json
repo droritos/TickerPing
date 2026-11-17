@@ -90,10 +90,10 @@
     "direction": "BELOW",
     "note": "",
     "active": true,
-    "triggered": false,
-    "trigger_price": null,
+    "triggered": true,
+    "trigger_price": 279.72,
     "created_at": "2026-11-12T18:00:51.797934",
-    "last_triggered_at": null
+    "last_triggered_at": "2026-11-17T17:47:48.382851"
   },
   {
     "id": "5651e6ba",
